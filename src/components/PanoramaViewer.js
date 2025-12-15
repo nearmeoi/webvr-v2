@@ -7,6 +7,7 @@ export class PanoramaViewer {
         this.onBack = onBack;
         this.camera = camera;
         this.group = new THREE.Group();
+        this.group.position.set(0, 1.6, 0); // Center everything at eye level
         this.scene.add(this.group);
         this.group.visible = false; // Hidden initially
         this.currentAudio = null;
@@ -31,14 +32,46 @@ export class PanoramaViewer {
 
         // Ensure GazeController can hit this
         this.group.userData.isInteractable = false; // Container not interactable
+
+        // DEBUG MODE: Click to get angle
+        window.addEventListener('click', (event) => {
+            if (!this.group.visible) return; // Only when pano is active
+
+            const mouse = new THREE.Vector2();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, this.camera);
+
+            const intersects = raycaster.intersectObject(this.sphere);
+            if (intersects.length > 0) {
+                const p = intersects[0].point;
+                // Calculate angle based on standard (x, z)
+                let angleDeg = Math.atan2(p.x, p.z) * (180 / Math.PI);
+                
+                // Convert to 0-360 range
+                if (angleDeg < 0) angleDeg += 360;
+                angleDeg = Math.round(angleDeg);
+
+                const debugInfo = document.getElementById('debug-info');
+                if (debugInfo) {
+                    debugInfo.style.display = 'block';
+                    debugInfo.innerText = `ANGLE: ${angleDeg}°`;
+                    
+                    // Auto-copy to clipboard if possible (might require permission/secure context)
+                    // navigator.clipboard.writeText(angleDeg);
+                }
+            }
+        });
     }
 
     createBackButton() {
-        const geometry = new THREE.PlaneGeometry(0.5, 0.2); // Sized to match texture ratio
+        const geometry = new THREE.PlaneGeometry(0.4, 0.18); // Wide but same height as audio
 
         const canvas = document.createElement('canvas');
-        canvas.width = 500;
-        canvas.height = 200;
+        canvas.width = 400;
+        canvas.height = 180; // Matching aspect ratio roughly
         const ctx = canvas.getContext('2d');
 
         // Helper
@@ -57,21 +90,21 @@ export class PanoramaViewer {
         }
 
         // Glass button style
-        ctx.clearRect(0, 0, 500, 200);
-        roundRect(10, 10, 480, 180, 50); // Fully rounded "pill"
+        ctx.clearRect(0, 0, 400, 180);
+        roundRect(10, 10, 380, 160, 40); // Rounded pill
         ctx.fillStyle = 'rgba(200, 50, 50, 0.4)'; // Red-ish glass
         ctx.fill();
         ctx.strokeStyle = 'rgba(255, 100, 100, 0.8)';
-        ctx.lineWidth = 10;
+        ctx.lineWidth = 8;
         ctx.stroke();
 
         ctx.fillStyle = 'white';
-        ctx.font = 'bold 60px sans-serif';
+        ctx.font = 'bold 40px sans-serif'; // Smaller font
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
         ctx.shadowBlur = 5;
-        ctx.fillText('BACK', 250, 100);
+        ctx.fillText('BACK', 200, 90);
 
         const texture = new THREE.CanvasTexture(canvas);
         const material = new THREE.MeshBasicMaterial({
@@ -81,8 +114,8 @@ export class PanoramaViewer {
         });
 
         this.backBtn = new THREE.Mesh(geometry, material);
-        this.backBtn.position.set(0, -0.6, -1.8);
-        this.backBtn.lookAt(0, 0, 0);
+        this.backBtn.position.set(0, -1.0, -1.6); // Moved to Z -1.6 to match radius
+        this.backBtn.lookAt(0, 0.6, 0);
 
         // Interaction
         this.backBtn.userData.isInteractable = true;
@@ -115,10 +148,10 @@ export class PanoramaViewer {
         const playAngle = Math.PI * 0.3; // ~55 degrees
         this.playBtn.position.set(
             Math.sin(playAngle) * 1.6,
-            -0.6,
+            -1.0,
             -Math.cos(playAngle) * 1.6
         );
-        this.playBtn.lookAt(0, -0.6, 0);
+        this.playBtn.lookAt(0, 0.6, 0);
         this.playBtn.userData.isInteractable = true;
         this.playBtn.onHoverIn = () => this.playBtn.scale.set(1.2, 1.2, 1.2);
         this.playBtn.onHoverOut = () => this.playBtn.scale.set(1, 1, 1);
@@ -144,10 +177,10 @@ export class PanoramaViewer {
         const muteAngle = Math.PI * 0.34; // ~62 degrees (7° gap from play)
         this.muteBtn.position.set(
             Math.sin(muteAngle) * 1.6,
-            -0.6,
+            -1.0,
             -Math.cos(muteAngle) * 1.6
         );
-        this.muteBtn.lookAt(0, -0.6, 0);
+        this.muteBtn.lookAt(0, 0.6, 0);
         this.muteBtn.userData.isInteractable = true;
         this.muteBtn.onHoverIn = () => this.muteBtn.scale.set(1.2, 1.2, 1.2);
         this.muteBtn.onHoverOut = () => this.muteBtn.scale.set(1, 1, 1);
@@ -158,27 +191,45 @@ export class PanoramaViewer {
     setAudioButtonsPosition(mode) {
         // mode: 'with-dock' (Toraja) or 'standalone' (other locations)
         const radius = 1.6;
-        const y = -0.6;
+        let y; 
+        
+        // SYNC_NOTE: Ensure yUp matches the Back button's local Y position in standalone mode!
+        // Currently Back button is at local Y = -1.0 (World 0.6)
+        const yUp = -1.0; 
+
+        let playAngle;
+        let muteAngle;
 
         if (mode === 'with-dock') {
             // Far right to avoid dock thumbnails
-            const playAngle = Math.PI * 0.3; // ~55°
-            const muteAngle = Math.PI * 0.34; // ~62°
+            
+            // SYNC_NOTE: This height must match the SubMenu dock height!
+            // SubMenu dock is at World Y = 0.7.
+            // Panorama Group is at World Y = 1.6.
+            // So local Y = 0.7 - 1.6 = -0.9.
+            y = -0.9; 
+            
+            playAngle = Math.PI * 0.3; // ~55°
+            muteAngle = Math.PI * 0.34; // ~62°
 
             this.playBtn.position.set(Math.sin(playAngle) * radius, y, -Math.cos(playAngle) * radius);
             this.muteBtn.position.set(Math.sin(muteAngle) * radius, y, -Math.cos(muteAngle) * radius);
+            
+            // Look at world height 0.7 (same as buttons)
+            this.playBtn.lookAt(0, 0.7, 0);
+            this.muteBtn.lookAt(0, 0.7, 0);
         } else {
-            // Close to Back button (standalone mode)
-            const playAngle = Math.PI * 0.067; // ~12° right of center
-            const muteAngle = Math.PI * 0.106; // ~19° right of center
-            const yUp = -0.55; // Adjusted height
+            // Close to Back button (standalone mode) - TIGHTER spacing
+            playAngle = Math.PI * 0.075; // Shifted right (~13.5°)
+            muteAngle = Math.PI * 0.115; // Shifted right (~20.7°)
 
             this.playBtn.position.set(Math.sin(playAngle) * radius, yUp, -Math.cos(playAngle) * radius);
             this.muteBtn.position.set(Math.sin(muteAngle) * radius, yUp, -Math.cos(muteAngle) * radius);
+            
+            // Look at world height 0.6 (same as buttons)
+            this.playBtn.lookAt(0, 0.6, 0);
+            this.muteBtn.lookAt(0, 0.6, 0);
         }
-
-        this.playBtn.lookAt(0, y, 0);
-        this.muteBtn.lookAt(0, y, 0);
     }
 
     updatePlayButton(isPlaying) {
@@ -374,33 +425,38 @@ export class PanoramaViewer {
 
     createArrowTexture() {
         const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 256;
+        canvas.width = 128;
+        canvas.height = 128;
         const ctx = canvas.getContext('2d');
 
-        // Draw Arrow only (no label)
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        // Outer glow (soft light blue halo)
         ctx.beginPath();
-        ctx.moveTo(128, 30);   // Top point
-        ctx.lineTo(210, 140);  // Right corner
-        ctx.lineTo(155, 140);
-        ctx.lineTo(155, 230);  // Bottom
-        ctx.lineTo(101, 230);
-        ctx.lineTo(101, 140);
-        ctx.lineTo(46, 140);   // Left corner
-        ctx.closePath();
+        ctx.arc(64, 64, 50, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(173, 216, 230, 0.2)'; // Light blue, low opacity
         ctx.fill();
 
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.lineWidth = 4;
+        // Stroke (slightly darker blue outline)
+        ctx.lineWidth = 4; // Increased linewidth for better visibility
+        ctx.strokeStyle = 'rgba(70, 130, 180, 0.7)'; // SteelBlue, good opacity
         ctx.stroke();
+
+        // Inner core (off-white/light blue)
+        ctx.beginPath();
+        ctx.arc(64, 64, 25, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(240, 248, 255, 0.95)'; // AliceBlue, high opacity
+        ctx.fill();
+
+        // Center dot (dark grey for bullseye effect and contrast)
+        ctx.beginPath();
+        ctx.arc(64, 64, 8, 0, Math.PI * 2); // Slightly larger center dot
+        ctx.fillStyle = 'rgba(50, 50, 50, 0.8)'; // Dark grey, higher opacity
+        ctx.fill();
 
         return new THREE.CanvasTexture(canvas);
     }
-
     createArrowMesh(linkData) {
         const texture = this.createArrowTexture();
-        const geometry = new THREE.PlaneGeometry(0.8, 0.8);
+        const geometry = new THREE.PlaneGeometry(0.3, 0.3); // Small size
         const material = new THREE.MeshBasicMaterial({
             map: texture,
             transparent: true,
@@ -410,21 +466,21 @@ export class PanoramaViewer {
 
         const mesh = new THREE.Mesh(geometry, material);
 
-        // Angle-based positioning (0° = front, 90° = right, 180° = back, 270° = left)
-        const radius = 4; // Distance from center
-        const yPos = -2;  // Lower position to avoid dock collision
-        const angleRad = (linkData.angle || 0) * (Math.PI / 180); // Convert degrees to radians
+        // Angle-based positioning
+        const radius = 4.5; // Slightly further away
+        const yPos = 0;  // Eye level (0 relative to group at 1.6)
+        const angleRad = (linkData.angle || 0) * (Math.PI / 180);
 
         // Calculate position on circle
         const x = Math.sin(angleRad) * radius;
-        const z = -Math.cos(angleRad) * radius; // Negative because 0° should be "forward" (-Z)
+        const z = -Math.cos(angleRad) * radius;
 
         mesh.position.set(x, yPos, z);
 
         // Face the user (center)
-        mesh.lookAt(0, yPos, 0);
-        // Tilt to lay flat on floor
-        mesh.rotateX(-Math.PI / 2.5);
+        mesh.lookAt(0, 0, 0); 
+        // No rotateX needed, billboard facing user
+
 
         mesh.userData.isInteractable = true;
         mesh.onHoverIn = () => mesh.scale.set(1.3, 1.3, 1.3);

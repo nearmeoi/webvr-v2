@@ -108,7 +108,9 @@ export class SubMenu {
         // Bottom Dock Layout
         // Arc is smaller and lower
         const totalAngle = Math.PI * 0.5; // 90 degrees arc for tighter packing
-        const startAngle = Math.PI - totalAngle / 2;
+        // Shift arc center to the left to balance audio buttons on the right
+        const centerOffset = 0.2; 
+        const startAngle = Math.PI + centerOffset - totalAngle / 2;
         const step = itemCount > 1 ? totalAngle / (itemCount - 1) : 0;
 
         for (let i = 0; i < itemCount; i++) {
@@ -146,11 +148,11 @@ export class SubMenu {
 
             mesh.position.set(
                 Math.sin(theta) * this.radius * 0.9, // Slightly closer
-                -0.6, // Lowered to not block view
+                0.7, // Lowered further
                 Math.cos(theta) * this.radius * 0.9
             );
 
-            mesh.lookAt(0, -0.6, 0);
+            mesh.lookAt(0, 0.7, 0);
 
             // User Data for interaction
             mesh.userData.id = i;
@@ -245,8 +247,8 @@ export class SubMenu {
         });
 
         this.backBtn = new THREE.Mesh(geometry, material);
-        this.backBtn.position.set(0, -0.85, -1.5);
-        this.backBtn.lookAt(0, -0.85, 0);
+        this.backBtn.position.set(0, 0.5, -1.5);
+        this.backBtn.lookAt(0, 0.5, 0);
 
         this.backBtn.userData.isInteractable = true;
         this.backBtn.onHoverIn = () => this.backBtn.scale.set(1.1, 1.1, 1.1);
@@ -330,6 +332,14 @@ export class SubMenu {
 
     show() {
         this.group.visible = true;
+        
+        // Reset rotation to face the user
+        if (this.camera) {
+            const vector = new THREE.Vector3();
+            this.camera.getWorldDirection(vector);
+            const angle = Math.atan2(vector.x, vector.z);
+            this.group.rotation.y = angle - Math.PI;
+        }
     }
 
     hide() {

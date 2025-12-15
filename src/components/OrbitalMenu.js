@@ -282,11 +282,11 @@ export class OrbitalMenu {
 
             mesh.position.set(
                 Math.sin(theta) * this.radius,
-                0,
+                1.6,
                 Math.cos(theta) * this.radius
             );
 
-            mesh.lookAt(0, 0, 0);
+            mesh.lookAt(0, 1.6, 0);
 
             // User Data for interaction
             mesh.userData.id = i;
@@ -316,6 +316,25 @@ export class OrbitalMenu {
 
     show() {
         this.group.visible = true;
+
+        // Reset rotation to face the user
+        if (this.camera) {
+            // Get camera direction projected on XZ plane
+            const vector = new THREE.Vector3();
+            this.camera.getWorldDirection(vector);
+            const angle = Math.atan2(vector.x, vector.z);
+
+            // Rotate group to align with camera direction
+            // Note: Menu items are at +Z relative to group center usually, or arranged in arc.
+            // Our items are arranged around (0,0,0) facing center.
+            // If user looks at angle A, we want the center of the arc to be at angle A.
+            // The arc center is roughly at theta = PI (backwards).
+            // Let's adjust offset based on layout.
+            // Initial layout: center is at ~PI (back).
+            // So if user looks at Angle, we want Group Angle to be matching.
+            
+            this.group.rotation.y = angle - Math.PI; 
+        }
     }
 
     hide() {

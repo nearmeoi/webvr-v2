@@ -62,7 +62,7 @@ export class GazeController {
                 this.progressMesh.scale.set(progress, progress, 1);
 
                 if (this.hoverTime >= this.ACTIVATION_TIME) {
-                    this.trigger(target);
+                    this.trigger(target, intersects[0]);
                     this.hoverTime = 0; // Reset or prevent multi-trigger
                     this.progressMesh.scale.set(0, 0, 1);
                 }
@@ -91,7 +91,7 @@ export class GazeController {
         if (object.onHoverOut) object.onHoverOut();
     }
 
-    trigger(object) {
-        if (object.onClick) object.onClick();
+    trigger(object, intersection) {
+        if (object.onClick) object.onClick(intersection);
     }
 }

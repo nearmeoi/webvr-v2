@@ -22,7 +22,7 @@ class App {
 
         this.camera = new THREE.PerspectiveCamera(this.defaultFOV, window.innerWidth / window.innerHeight, 0.1, 100);
         this.scene.add(this.camera);
-        this.camera.position.set(0, 0, 0.1); // Offset for OrbitControls to work
+        this.camera.position.set(0, 1.6, 0.1); // Offset for OrbitControls to work, raised to eye level
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -39,6 +39,8 @@ class App {
         this.controls.screenSpacePanning = false;
         this.controls.enableZoom = false; // Disable default zoom, we'll handle FOV zoom
         this.controls.rotateSpeed = 0.5; // Slower rotation for more control
+        this.controls.target.set(0, 1.6, 0); // Target eye level
+
 
         // Mouse wheel zoom (FOV-based zoom for panorama viewing)
         this.container.addEventListener('wheel', (e) => {
