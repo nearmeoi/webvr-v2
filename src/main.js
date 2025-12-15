@@ -50,13 +50,21 @@ class App {
         }, { passive: false });
 
         // VR session handling for narrower FOV
+        this.isVRMode = false;
         this.renderer.xr.addEventListener('sessionstart', () => {
             this.camera.fov = this.vrFOV;
             this.camera.updateProjectionMatrix();
+            this.isVRMode = true;
+            // Disable camera-following in VR
+            if (this.subMenu) this.subMenu.setVRMode(true);
+            this.panoramaViewer.setVRMode(true);
         });
         this.renderer.xr.addEventListener('sessionend', () => {
             this.camera.fov = this.defaultFOV;
             this.camera.updateProjectionMatrix();
+            this.isVRMode = false;
+            if (this.subMenu) this.subMenu.setVRMode(false);
+            this.panoramaViewer.setVRMode(false);
         });
 
         // Lights

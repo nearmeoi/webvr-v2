@@ -289,6 +289,9 @@ export class SubMenu {
     }
 
     update(delta) {
+        // Skip camera-following in VR mode (user can look around freely)
+        if (this.isVRMode) return;
+
         // Make dock follow camera's horizontal rotation (orbit only, not pitch)
         // BUT stop following when user looks DOWN toward the dock
         if (this.camera) {
@@ -319,6 +322,10 @@ export class SubMenu {
             }
             // Otherwise, dock stays in place so user can interact
         }
+    }
+
+    setVRMode(isVR) {
+        this.isVRMode = isVR;
     }
 
     show() {

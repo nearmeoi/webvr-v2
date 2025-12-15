@@ -505,6 +505,9 @@ export class PanoramaViewer {
     }
 
     update(delta) {
+        // Skip camera-following in VR mode
+        if (this.isVRMode) return;
+
         // Make control dock follow camera rotation (like SubMenu)
         if (this.camera && this.controlDock) {
             const cameraDirection = new THREE.Vector3();
@@ -527,5 +530,9 @@ export class PanoramaViewer {
                 this.controlDock.rotation.y += diff * 0.08;
             }
         }
+    }
+
+    setVRMode(isVR) {
+        this.isVRMode = isVR;
     }
 }
