@@ -5,6 +5,7 @@ import { GazeController } from './components/GazeController.js';
 import { OrbitalMenu, LOCATIONS } from './components/OrbitalMenu.js';
 import { SubMenu } from './components/SubMenu.js';
 import { PanoramaViewer } from './components/PanoramaViewer.js';
+import { WelcomeScreen } from './components/WelcomeScreen.js';
 
 class App {
     constructor() {
@@ -12,7 +13,9 @@ class App {
         document.body.appendChild(this.container);
 
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x101010);
+        
+        // --- IMPROVED BACKGROUND (Gradient) ---
+        this.createGradientBackground();
 
         // Default FOV 60 (narrower than before), VR will use 50
         this.defaultFOV = 60;
@@ -57,7 +60,7 @@ class App {
             this.camera.fov = this.vrFOV;
             this.camera.updateProjectionMatrix();
             this.isVRMode = true;
-            // Disable camera-following in VR
+            // Enable camera-following in VR
             if (this.subMenu) this.subMenu.setVRMode(true);
             this.panoramaViewer.setVRMode(true);
         });
@@ -74,21 +77,27 @@ class App {
         this.scene.add(light);
 
         // State tracking
-        this.currentState = 'main-menu'; // 'main-menu', 'sub-menu', 'panorama'
+        this.currentState = 'welcome'; // Start at welcome
         this.currentSubMenuParent = null;
 
         // Components
         this.gazeController = new GazeController(this.camera);
+
+        // Welcome Screen
+        this.welcomeScreen = new WelcomeScreen(this.scene, () => {
+            this.onWelcomeStart();
+        });
 
         // Main panorama viewer with dynamic back handler
         this.panoramaViewer = new PanoramaViewer(this.scene, () => {
             this.onPanoramaBack();
         }, this.camera);
 
-        // Main orbital menu
+        // Main orbital menu (Hidden initially)
         this.orbitalMenu = new OrbitalMenu(this.scene, this.camera, (index) => {
             this.onMainMenuSelect(index);
         });
+        this.orbitalMenu.hide(); // Hide at start
 
         // Sub-menu (will be created dynamically)
         this.subMenu = null;
@@ -96,6 +105,41 @@ class App {
         window.addEventListener('resize', this.onWindowResize.bind(this));
 
         this.renderer.setAnimationLoop(this.render.bind(this));
+    }
+
+    createGradientBackground() {
+        // Create a large sphere for the background
+        const geometry = new THREE.SphereGeometry(80, 32, 32);
+        geometry.scale(-1, 1, 1); // Invert normals
+
+        // Generate Gradient Texture
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+
+        // Radial Gradient: Dark Blue/Purple to Black
+        // Center of gradient at bottom (0.5, 1.0) for "horizon" feel or center?
+        // Let's do a top-down gradient.
+        const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+        gradient.addColorStop(0, '#4F657B'); // Top: Even Darker Muted Blue
+        gradient.addColorStop(1, '#20355A'); // Bottom: Very Dark Deep Blue
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 512, 512);
+
+        // Removed "stars" (noise) for a simpler look
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        const bgMesh = new THREE.Mesh(geometry, material);
+        this.scene.add(bgMesh);
+    }
+
+    onWelcomeStart() {
+        this.welcomeScreen.hide();
+        this.currentState = 'main-menu';
+        this.orbitalMenu.show();
     }
 
     onMainMenuSelect(index) {
@@ -158,6 +202,9 @@ class App {
         this.subMenu.show();
         // Highlight first item (Welcome) initially
         this.subMenu.setActive(0);
+        
+        // Sync VR mode state
+        if(this.isVRMode) this.subMenu.setVRMode(true);
     }
 
     onSubMenuSelect(subLocation) {
@@ -196,9 +243,17 @@ class App {
 
         // Update gaze - check VISIBLE groups only
         const interactables = [];
+        // Add Welcome Screen to interactables if visible
+        if (this.welcomeScreen && this.welcomeScreen.group.visible) {
+            // Need to pass the mesh itself, usually group doesn't trigger intersect unless recursive=true
+            // GazeController uses recursive=true, so passing group is fine
+            interactables.push(this.welcomeScreen.group);
+        }
+
         if (this.orbitalMenu.group.visible) interactables.push(this.orbitalMenu.group);
         if (this.subMenu && this.subMenu.group.visible) interactables.push(this.subMenu.group);
         if (this.panoramaViewer.group.visible) interactables.push(this.panoramaViewer.group);
+        
         this.gazeController.update(this.scene, interactables, delta);
 
         // Update components

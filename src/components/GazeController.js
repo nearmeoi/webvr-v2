@@ -36,7 +36,13 @@ export class GazeController {
     update(scene, interactables, delta) {
         // In WebXR, raycaster usually set from controller or camera view
         // For gaze, we cast from camera position into camera direction
-        this.raycaster.setFromCamera(this.center, this.camera);
+        
+        // Use world position/direction for robust VR gaze
+        const origin = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        this.camera.getWorldPosition(origin);
+        this.camera.getWorldDirection(direction);
+        this.raycaster.set(origin, direction);
 
         const intersects = this.raycaster.intersectObjects(interactables, true); // Recursive check
 

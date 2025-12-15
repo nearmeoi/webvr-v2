@@ -33,9 +33,9 @@ export class PanoramaViewer {
         // Ensure GazeController can hit this
         this.group.userData.isInteractable = false; // Container not interactable
 
-        // DEBUG MODE: Click to get angle
+        // TEMP DEBUG: Click to get angle (Restored for correction)
         window.addEventListener('click', (event) => {
-            if (!this.group.visible) return; // Only when pano is active
+            if (!this.group.visible) return;
 
             const mouse = new THREE.Vector2();
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -47,21 +47,14 @@ export class PanoramaViewer {
             const intersects = raycaster.intersectObject(this.sphere);
             if (intersects.length > 0) {
                 const p = intersects[0].point;
-                // Calculate angle based on standard (x, z)
-                let angleDeg = Math.atan2(p.x, p.z) * (180 / Math.PI);
+                // Correct formula: atan2(x, -z)
+                let angleDeg = Math.atan2(p.x, -p.z) * (180 / Math.PI);
                 
-                // Convert to 0-360 range
                 if (angleDeg < 0) angleDeg += 360;
                 angleDeg = Math.round(angleDeg);
 
-                const debugInfo = document.getElementById('debug-info');
-                if (debugInfo) {
-                    debugInfo.style.display = 'block';
-                    debugInfo.innerText = `ANGLE: ${angleDeg}°`;
-                    
-                    // Auto-copy to clipboard if possible (might require permission/secure context)
-                    // navigator.clipboard.writeText(angleDeg);
-                }
+                // Show alert for easy reading on mobile
+                alert(`ANGLE: ${angleDeg}`); 
             }
         });
     }
