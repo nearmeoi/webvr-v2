@@ -2,8 +2,8 @@ import * as THREE from 'three';
 
 /**
  * StereoEffect - Creates a stereoscopic (side-by-side) rendering effect
+ * With barrel distortion and vignette to simulate VR headset lens
  * For use with VR headsets like Google Cardboard on iOS devices
- * Based on Three.js StereoEffect example
  */
 export class StereoEffect {
     constructor(renderer) {
@@ -11,96 +11,254 @@ export class StereoEffect {
 
         // Stereo camera setup
         this.stereo = new THREE.StereoCamera();
-        this.stereo.eyeSep = 0.064; // Average human IPD (interpupillary distance) in meters
+        this.stereo.eyeSep = 0.064; // Average human IPD
 
         // Store original renderer settings
         this._size = new THREE.Vector2();
         this._rendererSize = new THREE.Vector2();
 
         this.enabled = false;
+
+        // Create render targets for post-processing
+        this.renderTargetL = null;
+        this.renderTargetR = null;
+
+        // Create barrel distortion material
+        this.distortionMaterial = this.createDistortionMaterial();
+
+        // Create full-screen quad for post-processing
+        this.quadGeometry = new THREE.PlaneGeometry(2, 2);
+        this.quadMeshL = new THREE.Mesh(this.quadGeometry, this.distortionMaterial.clone());
+        this.quadMeshR = new THREE.Mesh(this.quadGeometry, this.distortionMaterial.clone());
+
+        // Orthographic camera for post-processing
+        this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+        // Scene for post-processing
+        this.postScene = new THREE.Scene();
+
+        // Black divider
+        this.divider = null;
+        this.createDivider();
     }
 
-    /**
-     * Set the eye separation distance (IPD)
-     * @param {number} eyeSep - Eye separation in meters (default 0.064)
-     */
+    createDistortionMaterial() {
+        // Barrel distortion shader - simulates VR lens
+        const vertexShader = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            uniform sampler2D tDiffuse;
+            uniform vec2 resolution;
+            uniform float distortion;
+            uniform float vignetteStrength;
+            uniform float vignetteSize;
+            
+            varying vec2 vUv;
+            
+            vec2 barrelDistortion(vec2 coord) {
+                vec2 cc = coord - 0.5;
+                float dist = dot(cc, cc);
+                
+                // Barrel distortion formula
+                float distortionFactor = 1.0 + dist * distortion;
+                
+                return cc * distortionFactor + 0.5;
+            }
+            
+            void main() {
+                // Apply barrel distortion
+                vec2 distortedUV = barrelDistortion(vUv);
+                
+                // Check if UV is out of bounds (creates black edges)
+                if (distortedUV.x < 0.0 || distortedUV.x > 1.0 || 
+                    distortedUV.y < 0.0 || distortedUV.y > 1.0) {
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    return;
+                }
+                
+                vec4 color = texture2D(tDiffuse, distortedUV);
+                
+                // Apply vignette (dark edges like real lens)
+                vec2 center = vUv - 0.5;
+                float vignette = 1.0 - smoothstep(vignetteSize, vignetteSize + 0.3, length(center) * 2.0);
+                vignette = mix(1.0, vignette, vignetteStrength);
+                
+                // Circular mask (makes it look like looking through lens)
+                float circleMask = 1.0 - smoothstep(0.45, 0.5, length(center));
+                
+                color.rgb *= vignette;
+                color.rgb *= circleMask;
+                
+                // Add subtle chromatic aberration at edges
+                float chromaAmount = length(center) * 0.02;
+                float r = texture2D(tDiffuse, distortedUV + vec2(chromaAmount, 0.0)).r;
+                float b = texture2D(tDiffuse, distortedUV - vec2(chromaAmount, 0.0)).b;
+                color.r = mix(color.r, r, 0.3);
+                color.b = mix(color.b, b, 0.3);
+                
+                gl_FragColor = color;
+            }
+        `;
+
+        return new THREE.ShaderMaterial({
+            uniforms: {
+                tDiffuse: { value: null },
+                resolution: { value: new THREE.Vector2() },
+                distortion: { value: 0.2 }, // Barrel distortion strength
+                vignetteStrength: { value: 0.8 }, // How dark edges get
+                vignetteSize: { value: 0.4 } // Where vignette starts
+            },
+            vertexShader,
+            fragmentShader,
+            depthTest: false,
+            depthWrite: false
+        });
+    }
+
+    createDivider() {
+        // Black divider in the middle - simulates headset nose piece
+        const dividerGeometry = new THREE.PlaneGeometry(0.02, 2);
+        const dividerMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            depthTest: false,
+            depthWrite: false
+        });
+        this.divider = new THREE.Mesh(dividerGeometry, dividerMaterial);
+        this.divider.position.set(0, 0, -0.5);
+    }
+
     setEyeSeparation(eyeSep) {
         this.stereo.eyeSep = eyeSep;
     }
 
-    /**
-     * Enable stereo rendering
-     */
-    enable() {
-        this.enabled = true;
-        // Force fullscreen-like experience
-        this.renderer.setPixelRatio(1); // Lower for performance
+    setDistortion(value) {
+        this.quadMeshL.material.uniforms.distortion.value = value;
+        this.quadMeshR.material.uniforms.distortion.value = value;
     }
 
-    /**
-     * Disable stereo rendering
-     */
+    enable() {
+        this.enabled = true;
+        this.renderer.setPixelRatio(1);
+
+        // Create render targets at current size
+        this.renderer.getSize(this._size);
+        const halfWidth = Math.floor(this._size.width / 2);
+        const height = this._size.height;
+
+        this.renderTargetL = new THREE.WebGLRenderTarget(halfWidth, height, {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat
+        });
+
+        this.renderTargetR = new THREE.WebGLRenderTarget(halfWidth, height, {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat
+        });
+
+        // Update material uniforms
+        this.quadMeshL.material.uniforms.tDiffuse.value = this.renderTargetL.texture;
+        this.quadMeshR.material.uniforms.tDiffuse.value = this.renderTargetR.texture;
+        this.quadMeshL.material.uniforms.resolution.value.set(halfWidth, height);
+        this.quadMeshR.material.uniforms.resolution.value.set(halfWidth, height);
+    }
+
     disable() {
         this.enabled = false;
         this.renderer.setPixelRatio(window.devicePixelRatio);
+
+        // Dispose render targets
+        if (this.renderTargetL) {
+            this.renderTargetL.dispose();
+            this.renderTargetL = null;
+        }
+        if (this.renderTargetR) {
+            this.renderTargetR.dispose();
+            this.renderTargetR = null;
+        }
     }
 
-    /**
-     * Get the current size
-     */
     getSize() {
         this.renderer.getSize(this._rendererSize);
         return this._rendererSize;
     }
 
-    /**
-     * Set the size of the renderer
-     */
     setSize(width, height) {
         this.renderer.setSize(width, height);
+
+        if (this.enabled) {
+            const halfWidth = Math.floor(width / 2);
+            this.renderTargetL?.setSize(halfWidth, height);
+            this.renderTargetR?.setSize(halfWidth, height);
+            this.quadMeshL.material.uniforms.resolution.value.set(halfWidth, height);
+            this.quadMeshR.material.uniforms.resolution.value.set(halfWidth, height);
+        }
     }
 
-    /**
-     * Render the scene in stereo
-     * @param {THREE.Scene} scene 
-     * @param {THREE.Camera} camera 
-     */
     render(scene, camera) {
         if (!this.enabled) {
             this.renderer.render(scene, camera);
             return;
         }
 
-        // Get current renderer size
         this.renderer.getSize(this._size);
 
-        // Ensure we're rendering at correct size
-        if (this.renderer.autoClear) this.renderer.clear();
-        this.renderer.setScissorTest(true);
-
-        // Update stereo cameras from main camera
+        // Update stereo cameras
         this.stereo.update(camera);
 
         const halfWidth = this._size.width / 2;
 
-        // Render left eye
-        this.renderer.setScissor(0, 0, halfWidth, this._size.height);
-        this.renderer.setViewport(0, 0, halfWidth, this._size.height);
+        // Render left eye to render target
+        this.renderer.setRenderTarget(this.renderTargetL);
+        this.renderer.clear();
         this.renderer.render(scene, this.stereo.cameraL);
 
-        // Render right eye
-        this.renderer.setScissor(halfWidth, 0, halfWidth, this._size.height);
-        this.renderer.setViewport(halfWidth, 0, halfWidth, this._size.height);
+        // Render right eye to render target
+        this.renderer.setRenderTarget(this.renderTargetR);
+        this.renderer.clear();
         this.renderer.render(scene, this.stereo.cameraR);
 
-        // Reset scissor test
+        // Now render to screen with distortion
+        this.renderer.setRenderTarget(null);
+        this.renderer.clear();
+
+        // Clear everything to black first
+        this.renderer.setClearColor(0x000000);
+        this.renderer.clear();
+
+        // Left eye with distortion
+        this.renderer.setViewport(0, 0, halfWidth, this._size.height);
+        this.renderer.setScissorTest(true);
+        this.renderer.setScissor(0, 0, halfWidth, this._size.height);
+        this.postScene.children = [this.quadMeshL];
+        this.renderer.render(this.postScene, this.orthoCamera);
+
+        // Right eye with distortion
+        this.renderer.setViewport(halfWidth, 0, halfWidth, this._size.height);
+        this.renderer.setScissor(halfWidth, 0, halfWidth, this._size.height);
+        this.postScene.children = [this.quadMeshR];
+        this.renderer.render(this.postScene, this.orthoCamera);
+
+        // Draw black divider in the middle
         this.renderer.setScissorTest(false);
+        this.renderer.setViewport(0, 0, this._size.width, this._size.height);
+        this.postScene.children = [this.divider];
+        this.renderer.render(this.postScene, this.orthoCamera);
     }
 
-    /**
-     * Dispose of resources
-     */
     dispose() {
         this.disable();
+        this.quadGeometry.dispose();
+        this.quadMeshL.material.dispose();
+        this.quadMeshR.material.dispose();
+        this.divider.geometry.dispose();
+        this.divider.material.dispose();
     }
 }
