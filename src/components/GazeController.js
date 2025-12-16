@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 
 export class GazeController {
-    constructor(camera) {
+    constructor(camera, renderer) {
         this.camera = camera;
+        this.renderer = renderer; // For WebXR camera access
         this.raycaster = new THREE.Raycaster();
         this.center = new THREE.Vector2(0, 0); // Normalized center screen
 
@@ -45,8 +46,17 @@ export class GazeController {
         // Use world position/direction for robust VR gaze
         const origin = new THREE.Vector3();
         const direction = new THREE.Vector3();
-        this.camera.getWorldPosition(origin);
-        this.camera.getWorldDirection(direction);
+
+        // In WebXR mode, use the XR camera for accurate position/direction
+        if (this.renderer && this.renderer.xr && this.renderer.xr.isPresenting) {
+            const xrCamera = this.renderer.xr.getCamera();
+            xrCamera.getWorldPosition(origin);
+            xrCamera.getWorldDirection(direction);
+        } else {
+            this.camera.getWorldPosition(origin);
+            this.camera.getWorldDirection(direction);
+        }
+
         this.raycaster.set(origin, direction);
 
         const intersects = this.raycaster.intersectObjects(interactables, true); // Recursive check

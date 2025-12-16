@@ -9,7 +9,7 @@ import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { GyroscopeControls } from './components/GyroscopeControls.js';
 import { StereoEffect } from './components/StereoEffect.js';
 import { CardboardButton } from './components/CardboardButton.js';
-import { isIOS, isWebXRSupported, isMobile } from './utils/deviceDetection.js';
+import { isIOS, isWebXRSupported, isMobile, isCardboardForced } from './utils/deviceDetection.js';
 
 class App {
     constructor() {
@@ -18,12 +18,12 @@ class App {
 
         this.scene = new THREE.Scene();
 
-        // Detect iOS device
-        this.isIOSDevice = isIOS();
+        // Detect iOS device OR forced Cardboard mode via URL (?cardboard=true)
+        this.isIOSDevice = isIOS() || isCardboardForced();
         this.isMobileDevice = isMobile();
 
         if (this.isIOSDevice) {
-            console.log('iOS device detected - Cardboard VR mode enabled');
+            console.log('iOS/Cardboard mode enabled - using stereo rendering');
         }
 
         // --- IMPROVED BACKGROUND (Gradient) ---
@@ -115,7 +115,7 @@ class App {
         this.currentSubMenuParent = null;
 
         // Components
-        this.gazeController = new GazeController(this.camera);
+        this.gazeController = new GazeController(this.camera, this.renderer);
 
         // Welcome Screen - also handles gyroscope permission request on iOS
         this.welcomeScreen = new WelcomeScreen(this.scene, async () => {

@@ -240,7 +240,7 @@ export class SubMenu {
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
         ctx.shadowBlur = 4;
-        ctx.fillText('← BACK', 200, 75);
+        ctx.fillText('BACK', 200, 75);
 
         const texture = new THREE.CanvasTexture(canvas);
         const material = new THREE.MeshBasicMaterial({
@@ -357,8 +357,8 @@ export class SubMenu {
             // Add centerOffset (0.2) to match the dock's shifted position
             const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI + 0.2;
 
-            // If looking down more than ~15 degrees, stop rotating (let user select)
-            if (pitch > -0.26) { // -0.26 rad ≈ -15 degrees
+            // If looking down more than ~26 degrees, stop rotating (let user select)
+            if (pitch > -0.45) { // -0.45 rad ≈ -26 degrees (lowered threshold)
                 // Smoothly rotate to target (ease out)
                 // Normalize angles to avoid spinning the wrong way
                 let currentAngle = this.group.rotation.y;

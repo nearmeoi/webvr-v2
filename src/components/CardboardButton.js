@@ -1,4 +1,4 @@
-import { isIOS, isMobile } from '../utils/deviceDetection.js';
+import { isIOS, isMobile, isCardboardForced } from '../utils/deviceDetection.js';
 
 /**
  * Creates a VR button specifically for iOS devices
@@ -11,8 +11,8 @@ export class CardboardButton {
         this.isInVR = false;
         this.button = null;
 
-        // Only create button for iOS devices
-        if (isIOS()) {
+        // Create button for iOS devices OR when forced via URL (?cardboard=true)
+        if (isIOS() || isCardboardForced()) {
             this.createButton();
         }
     }

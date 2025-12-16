@@ -51,3 +51,12 @@ export async function requestGyroscopePermission() {
 export function isMobile() {
     return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
+
+/**
+ * Check if Cardboard mode is forced via URL parameter (?cardboard=true)
+ * Useful for testing iOS Cardboard mode on PC
+ */
+export function isCardboardForced() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('cardboard') === 'true';
+}

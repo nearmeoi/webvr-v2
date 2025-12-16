@@ -28,8 +28,10 @@ export class PanoramaViewer {
 
         this.createBackButton();
         this.createAudioControls();
+        this.createLoadingIndicator();
 
         this.textureLoader = new THREE.TextureLoader();
+        this.isLoading = false;
 
         // Ensure GazeController can hit this
         this.group.userData.isInteractable = false; // Container not interactable
@@ -216,8 +218,8 @@ export class PanoramaViewer {
             // So local Y = 0.7 - 1.6 = -0.9.
             y = -0.9;
 
-            playAngle = Math.PI * 0.3; // ~55°
-            muteAngle = Math.PI * 0.34; // ~62°
+            playAngle = Math.PI * 0.21; // ~38° (closer to dock)
+            muteAngle = Math.PI * 0.25; // ~45°
 
             this.playBtn.position.set(Math.sin(playAngle) * radius, y, -Math.cos(playAngle) * radius);
             this.muteBtn.position.set(Math.sin(muteAngle) * radius, y, -Math.cos(muteAngle) * radius);
@@ -400,6 +402,8 @@ export class PanoramaViewer {
         // Check for multi-scene data
         if (location.scenes && location.scenes.length > 0) {
             this.loadScene(location.scenes[0]);
+            // Lazy load other scenes in background
+            this.preloadScenes(location.scenes.slice(1));
         } else if (location.panorama) {
             this.loadTexture(location.panorama);
             this.clearHotspots();
@@ -412,22 +416,166 @@ export class PanoramaViewer {
         console.log('Loading scene:', sceneData.id);
         this.loadTexture(sceneData.path);
         this.renderHotspots(sceneData.links);
+
+        // Preload linked scenes in background
+        if (sceneData.links && this.currentLocation) {
+            const linkedPaths = sceneData.links
+                .map(link => {
+                    const linkedScene = this.currentLocation?.scenes?.find(s => s.id === link.target);
+                    return linkedScene?.path;
+                })
+                .filter(Boolean);
+            this.preloadTextures(linkedPaths);
+        }
     }
 
     loadTexture(path) {
+        // Check cache first
+        if (this.textureCache && this.textureCache.has(path)) {
+            console.log('Using cached texture:', path);
+            const cachedTexture = this.textureCache.get(path);
+            this.material.map = cachedTexture;
+            this.material.needsUpdate = true;
+            return; // No loading needed
+        }
+
+        // Show loading indicator
+        this.showLoading();
+
         this.textureLoader.load(
             path,
             (texture) => {
                 texture.colorSpace = THREE.SRGBColorSpace;
+                // Cache the texture
+                if (!this.textureCache) this.textureCache = new Map();
+                this.textureCache.set(path, texture);
+
                 this.material.map = texture;
                 this.material.needsUpdate = true;
+                // Hide loading indicator
+                this.hideLoading();
             },
             undefined,
             (error) => {
                 console.error('Error loading panorama:', error);
                 this.loadFallbackTexture('Error Loading');
+                this.hideLoading();
             }
         );
+    }
+
+    // Preload multiple textures in background (lazy loading)
+    preloadTextures(paths) {
+        if (!this.textureCache) this.textureCache = new Map();
+
+        paths.forEach(path => {
+            if (!path || this.textureCache.has(path)) return;
+
+            // Load in background without showing loading indicator
+            this.textureLoader.load(
+                path,
+                (texture) => {
+                    texture.colorSpace = THREE.SRGBColorSpace;
+                    this.textureCache.set(path, texture);
+                    console.log('Preloaded texture:', path);
+                },
+                undefined,
+                (error) => {
+                    console.warn('Failed to preload:', path, error);
+                }
+            );
+        });
+    }
+
+    // Preload scenes array
+    preloadScenes(scenes) {
+        if (!scenes || scenes.length === 0) return;
+        const paths = scenes.map(s => s.path).filter(Boolean);
+        this.preloadTextures(paths);
+    }
+
+    createLoadingIndicator() {
+        // Create a simple loading overlay
+        this.loadingGroup = new THREE.Group();
+        this.loadingGroup.visible = false;
+
+        // Dark semi-transparent background sphere
+        const bgGeometry = new THREE.SphereGeometry(49, 32, 32);
+        bgGeometry.scale(-1, 1, 1);
+        const bgMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            opacity: 0.7,
+            transparent: true
+        });
+        this.loadingBg = new THREE.Mesh(bgGeometry, bgMaterial);
+        this.loadingGroup.add(this.loadingBg);
+
+        // Loading text/spinner canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        this.loadingCanvas = canvas;
+        this.loadingCtx = canvas.getContext('2d');
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const planeGeometry = new THREE.PlaneGeometry(0.5, 0.5);
+        const planeMaterial = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false
+        });
+
+        this.loadingSpinner = new THREE.Mesh(planeGeometry, planeMaterial);
+        this.loadingSpinner.position.set(0, 0, -2);
+        this.loadingSpinner.renderOrder = 1000;
+        this.loadingGroup.add(this.loadingSpinner);
+
+        this.group.add(this.loadingGroup);
+        this.loadingRotation = 0;
+    }
+
+    updateLoadingSpinner() {
+        if (!this.loadingGroup.visible) return;
+
+        const ctx = this.loadingCtx;
+        ctx.clearRect(0, 0, 256, 256);
+
+        // Draw spinning circle
+        this.loadingRotation += 0.1;
+        ctx.save();
+        ctx.translate(128, 100);
+        ctx.rotate(this.loadingRotation);
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(0, 0, 40, 0, Math.PI * 1.5);
+        ctx.stroke();
+        ctx.restore();
+
+        // Draw "Loading..." text
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Loading...', 128, 180);
+
+        this.loadingSpinner.material.map.needsUpdate = true;
+    }
+
+    showLoading() {
+        this.isLoading = true;
+        if (this.loadingGroup) {
+            this.loadingGroup.visible = true;
+        }
+    }
+
+    hideLoading() {
+        this.isLoading = false;
+        if (this.loadingGroup) {
+            this.loadingGroup.visible = false;
+        }
     }
 
     createArrowTexture() {
@@ -603,6 +751,9 @@ export class PanoramaViewer {
             this.currentHotspots.forEach(animateObject);
         }
 
+        // Update loading spinner animation
+        this.updateLoadingSpinner();
+
         // === VR FIX: Sync sphere center with camera position for proper stereo ===
         // In VR/stereo mode, the sphere MUST be centered exactly at the camera 
         // position to prevent "double vision" where left/right eyes see different content
@@ -627,25 +778,16 @@ export class PanoramaViewer {
         }
 
         // Make control dock follow camera rotation (like SubMenu)
-        if (this.controlDock) {
+        if (this.controlDock && this.camera) {
             const cameraDirection = new THREE.Vector3();
-
-            // Use XR camera direction when in WebXR mode
-            if (this.renderer && this.renderer.xr && this.renderer.xr.isPresenting) {
-                const xrCamera = this.renderer.xr.getCamera();
-                xrCamera.getWorldDirection(cameraDirection);
-            } else if (this.camera) {
-                this.camera.getWorldDirection(cameraDirection);
-            } else {
-                return; // No camera available
-            }
+            this.camera.getWorldDirection(cameraDirection);
 
             // Check if looking down
             const pitch = Math.asin(cameraDirection.y);
             const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI;
 
             // Only rotate when NOT looking down at controls
-            if (pitch > -0.26) {
+            if (pitch > -0.45) { // -0.45 rad ≈ -26 degrees (lowered threshold)
                 let currentAngle = this.controlDock.rotation.y;
                 let diff = targetAngle - currentAngle;
 
