@@ -355,7 +355,7 @@ export class SubMenu {
 
             // Target angle based on camera direction
             // Add centerOffset (0.2) to match the dock's shifted position
-            const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + 0.2;
+            const targetAngle = -Math.atan2(cameraDirection.x, cameraDirection.z) + 0.2;
 
             // If looking down more than ~26 degrees, stop rotating (let user select)
             if (pitch > -0.45) { // -0.45 rad ≈ -26 degrees (lowered threshold)
@@ -388,7 +388,7 @@ export class SubMenu {
             const vector = new THREE.Vector3();
             this.camera.getWorldDirection(vector);
             const angle = Math.atan2(vector.x, vector.z);
-            this.group.rotation.y = Math.atan2(vector.x, vector.z) + 0.2; // +0.2 to match centerOffset
+            this.group.rotation.y = -Math.atan2(vector.x, vector.z) + 0.2; // +0.2 to match centerOffset
         }
     }
 

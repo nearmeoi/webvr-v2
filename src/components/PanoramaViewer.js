@@ -784,7 +784,7 @@ export class PanoramaViewer {
 
             // Check if looking down
             const pitch = Math.asin(cameraDirection.y);
-            const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z);
+            const targetAngle = -Math.atan2(cameraDirection.x, cameraDirection.z);
 
             // Only rotate when NOT looking down at controls
             if (pitch > -0.45) { // -0.45 rad ≈ -26 degrees (lowered threshold)
