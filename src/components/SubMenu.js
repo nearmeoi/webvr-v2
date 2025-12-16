@@ -297,9 +297,6 @@ export class SubMenu {
     }
 
     update(delta) {
-        // Skip camera-following in VR mode (user can look around freely)
-        if (this.isVRMode) return;
-
         const animSpeed = 6;
 
         // Smooth scale animation for thumbnails
@@ -348,7 +345,8 @@ export class SubMenu {
 
         // Make dock follow camera's horizontal rotation (orbit only, not pitch)
         // BUT stop following when user looks DOWN toward the dock
-        if (this.camera) {
+        // Skip camera-following in VR mode (user can look around freely)
+        if (this.camera && !this.isVRMode) {
             // Get camera's direction
             const cameraDirection = new THREE.Vector3();
             this.camera.getWorldDirection(cameraDirection);
