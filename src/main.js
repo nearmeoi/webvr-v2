@@ -13,7 +13,7 @@ class App {
         document.body.appendChild(this.container);
 
         this.scene = new THREE.Scene();
-        
+
         // --- IMPROVED BACKGROUND (Gradient) ---
         this.createGradientBackground();
 
@@ -202,9 +202,9 @@ class App {
         this.subMenu.show();
         // Highlight first item (Welcome) initially
         this.subMenu.setActive(0);
-        
+
         // Sync VR mode state
-        if(this.isVRMode) this.subMenu.setVRMode(true);
+        if (this.isVRMode) this.subMenu.setVRMode(true);
     }
 
     onSubMenuSelect(subLocation) {
@@ -253,10 +253,11 @@ class App {
         if (this.orbitalMenu.group.visible) interactables.push(this.orbitalMenu.group);
         if (this.subMenu && this.subMenu.group.visible) interactables.push(this.subMenu.group);
         if (this.panoramaViewer.group.visible) interactables.push(this.panoramaViewer.group);
-        
+
         this.gazeController.update(this.scene, interactables, delta);
 
         // Update components
+        if (this.welcomeScreen) this.welcomeScreen.update(delta);
         this.orbitalMenu.update(delta);
         if (this.subMenu) this.subMenu.update(delta);
         this.panoramaViewer.update(delta);

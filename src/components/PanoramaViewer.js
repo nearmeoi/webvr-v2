@@ -46,15 +46,19 @@ export class PanoramaViewer {
 
             const intersects = raycaster.intersectObject(this.sphere);
             if (intersects.length > 0) {
-                const p = intersects[0].point;
-                // Correct formula: atan2(x, -z)
-                let angleDeg = Math.atan2(p.x, -p.z) * (180 / Math.PI);
-                
+                // Convert world point to LOCAL coordinates of the sphere
+                const worldPoint = intersects[0].point;
+                const localPoint = this.sphere.worldToLocal(worldPoint.clone());
+
+                // Calculate angle from local coordinates (consistent regardless of camera rotation)
+                // Since the sphere is scaled -1 on X (geometry.scale(-1,1,1)), we need to account for that
+                let angleDeg = Math.atan2(localPoint.x, -localPoint.z) * (180 / Math.PI);
+
                 if (angleDeg < 0) angleDeg += 360;
                 angleDeg = Math.round(angleDeg);
 
-                // Show alert for easy reading on mobile
-                alert(`ANGLE: ${angleDeg}`); 
+                // Log to console for debugging
+                console.log(`ANGLE: ${angleDeg}° (click same spot on panorama = same angle)`);
             }
         });
     }
@@ -112,8 +116,11 @@ export class PanoramaViewer {
 
         // Interaction
         this.backBtn.userData.isInteractable = true;
-        this.backBtn.onHoverIn = () => this.backBtn.scale.set(1.1, 1.1, 1.1);
-        this.backBtn.onHoverOut = () => this.backBtn.scale.set(1, 1, 1);
+        this.backBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
+        this.backBtn.userData.targetScale = new THREE.Vector3(1, 1, 1);
+        this.backBtn.userData.animProgress = 1;
+        this.backBtn.onHoverIn = () => this.backBtn.userData.targetScale.set(1.1, 1.1, 1.1);
+        this.backBtn.onHoverOut = () => this.backBtn.userData.targetScale.copy(this.backBtn.userData.originalScale);
         this.backBtn.onClick = () => {
             if (this.onBack) this.onBack();
         };
@@ -146,8 +153,11 @@ export class PanoramaViewer {
         );
         this.playBtn.lookAt(0, 0.6, 0);
         this.playBtn.userData.isInteractable = true;
-        this.playBtn.onHoverIn = () => this.playBtn.scale.set(1.2, 1.2, 1.2);
-        this.playBtn.onHoverOut = () => this.playBtn.scale.set(1, 1, 1);
+        this.playBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
+        this.playBtn.userData.targetScale = new THREE.Vector3(1, 1, 1);
+        this.playBtn.userData.animProgress = 1;
+        this.playBtn.onHoverIn = () => this.playBtn.userData.targetScale.set(1.2, 1.2, 1.2);
+        this.playBtn.onHoverOut = () => this.playBtn.userData.targetScale.copy(this.playBtn.userData.originalScale);
         this.playBtn.onClick = () => this.togglePlay();
         this.controlDock.add(this.playBtn);
 
@@ -175,8 +185,11 @@ export class PanoramaViewer {
         );
         this.muteBtn.lookAt(0, 0.6, 0);
         this.muteBtn.userData.isInteractable = true;
-        this.muteBtn.onHoverIn = () => this.muteBtn.scale.set(1.2, 1.2, 1.2);
-        this.muteBtn.onHoverOut = () => this.muteBtn.scale.set(1, 1, 1);
+        this.muteBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
+        this.muteBtn.userData.targetScale = new THREE.Vector3(1, 1, 1);
+        this.muteBtn.userData.animProgress = 1;
+        this.muteBtn.onHoverIn = () => this.muteBtn.userData.targetScale.set(1.2, 1.2, 1.2);
+        this.muteBtn.onHoverOut = () => this.muteBtn.userData.targetScale.copy(this.muteBtn.userData.originalScale);
         this.muteBtn.onClick = () => this.toggleMute();
         this.controlDock.add(this.muteBtn);
     }
@@ -184,30 +197,30 @@ export class PanoramaViewer {
     setAudioButtonsPosition(mode) {
         // mode: 'with-dock' (Toraja) or 'standalone' (other locations)
         const radius = 1.6;
-        let y; 
-        
+        let y;
+
         // SYNC_NOTE: Ensure yUp matches the Back button's local Y position in standalone mode!
         // Currently Back button is at local Y = -1.0 (World 0.6)
-        const yUp = -1.0; 
+        const yUp = -1.0;
 
         let playAngle;
         let muteAngle;
 
         if (mode === 'with-dock') {
             // Far right to avoid dock thumbnails
-            
+
             // SYNC_NOTE: This height must match the SubMenu dock height!
             // SubMenu dock is at World Y = 0.7.
             // Panorama Group is at World Y = 1.6.
             // So local Y = 0.7 - 1.6 = -0.9.
-            y = -0.9; 
-            
+            y = -0.9;
+
             playAngle = Math.PI * 0.3; // ~55°
             muteAngle = Math.PI * 0.34; // ~62°
 
             this.playBtn.position.set(Math.sin(playAngle) * radius, y, -Math.cos(playAngle) * radius);
             this.muteBtn.position.set(Math.sin(muteAngle) * radius, y, -Math.cos(muteAngle) * radius);
-            
+
             // Look at world height 0.7 (same as buttons)
             this.playBtn.lookAt(0, 0.7, 0);
             this.muteBtn.lookAt(0, 0.7, 0);
@@ -218,7 +231,7 @@ export class PanoramaViewer {
 
             this.playBtn.position.set(Math.sin(playAngle) * radius, yUp, -Math.cos(playAngle) * radius);
             this.muteBtn.position.set(Math.sin(muteAngle) * radius, yUp, -Math.cos(muteAngle) * radius);
-            
+
             // Look at world height 0.6 (same as buttons)
             this.playBtn.lookAt(0, 0.6, 0);
             this.muteBtn.lookAt(0, 0.6, 0);
@@ -471,13 +484,16 @@ export class PanoramaViewer {
         mesh.position.set(x, yPos, z);
 
         // Face the user (center)
-        mesh.lookAt(0, 0, 0); 
+        mesh.lookAt(0, 0, 0);
         // No rotateX needed, billboard facing user
 
 
         mesh.userData.isInteractable = true;
-        mesh.onHoverIn = () => mesh.scale.set(1.3, 1.3, 1.3);
-        mesh.onHoverOut = () => mesh.scale.set(1, 1, 1);
+        mesh.userData.originalScale = new THREE.Vector3(1, 1, 1);
+        mesh.userData.targetScale = new THREE.Vector3(1, 1, 1);
+        mesh.userData.animProgress = 1;
+        mesh.onHoverIn = () => mesh.userData.targetScale.set(1.3, 1.3, 1.3);
+        mesh.onHoverOut = () => mesh.userData.targetScale.copy(mesh.userData.originalScale);
         mesh.onClick = () => {
             const nextScene = this.currentLocation.scenes.find(s => s.id === linkData.target);
             if (nextScene) {
@@ -556,6 +572,38 @@ export class PanoramaViewer {
     update(delta) {
         // Skip camera-following in VR mode
         if (this.isVRMode) return;
+
+        const animSpeed = 6;
+
+        // Helper function for smooth animation
+        const animateObject = (obj) => {
+            if (!obj || !obj.userData.targetScale) return;
+
+            const diff = obj.scale.distanceTo(obj.userData.targetScale);
+
+            if (diff > 0.01 && obj.userData.animProgress >= 1) {
+                obj.userData.animProgress = 0;
+                obj.userData.startScale = obj.scale.clone();
+            }
+
+            if (obj.userData.animProgress < 1 && obj.userData.startScale) {
+                obj.userData.animProgress = Math.min(1, obj.userData.animProgress + delta * animSpeed);
+                // Ease-in-out (smoothstep)
+                const t = obj.userData.animProgress;
+                const easeInOut = t * t * (3 - 2 * t);
+                obj.scale.lerpVectors(obj.userData.startScale, obj.userData.targetScale, easeInOut);
+            }
+        };
+
+        // Animate all buttons
+        animateObject(this.backBtn);
+        animateObject(this.playBtn);
+        animateObject(this.muteBtn);
+
+        // Animate hotspots
+        if (this.currentHotspots) {
+            this.currentHotspots.forEach(animateObject);
+        }
 
         // Make control dock follow camera rotation (like SubMenu)
         if (this.camera && this.controlDock) {

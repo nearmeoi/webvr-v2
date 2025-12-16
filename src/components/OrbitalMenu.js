@@ -275,7 +275,7 @@ export class OrbitalMenu {
             img.src = location.thumbnail;
 
             // Position in arc
-            const totalAngle = Math.PI * 0.6; // Narrower for 4 items
+            const totalAngle = Math.PI * 0.5; // Balanced spacing between items
             const startAngle = Math.PI - totalAngle / 2;
             const step = this.itemCount > 1 ? totalAngle / (this.itemCount - 1) : 0;
             const theta = startAngle + i * step;
@@ -293,13 +293,14 @@ export class OrbitalMenu {
             mesh.userData.locationData = location;
             mesh.userData.isInteractable = true;
             mesh.userData.originalScale = new THREE.Vector3(1, 1, 1);
+            mesh.userData.targetScale = new THREE.Vector3(1, 1, 1); // Target for smooth lerping
 
-            // Callbacks
+            // Callbacks - now set targetScale instead of direct scale change
             mesh.onHoverIn = () => {
-                mesh.scale.set(1.2, 1.2, 1.2);
+                mesh.userData.targetScale.set(1.15, 1.15, 1.15);
             };
             mesh.onHoverOut = () => {
-                mesh.scale.copy(mesh.userData.originalScale);
+                mesh.userData.targetScale.copy(mesh.userData.originalScale);
             };
             mesh.onClick = () => {
                 this.onSelect(i);
@@ -311,7 +312,40 @@ export class OrbitalMenu {
     }
 
     update(delta) {
-        // Animation removed for stability
+        // Smooth scale animation with ease-in-out
+        const animSpeed = 5; // Animation speed multiplier
+
+        this.thumbnails.forEach(mesh => {
+            if (mesh.userData.targetScale) {
+                // Initialize animation progress if not set
+                if (mesh.userData.animProgress === undefined) {
+                    mesh.userData.animProgress = 1;
+                }
+
+                // Detect target change - start new animation
+                const diff = mesh.scale.distanceTo(mesh.userData.targetScale);
+                if (diff > 0.01 && mesh.userData.animProgress >= 1) {
+                    mesh.userData.animProgress = 0;
+                    mesh.userData.startScale = mesh.scale.clone();
+                }
+
+                if (mesh.userData.animProgress < 1 && mesh.userData.startScale) {
+                    // Increment progress
+                    mesh.userData.animProgress = Math.min(1, mesh.userData.animProgress + delta * animSpeed);
+
+                    // Ease-in-out (smoothstep)
+                    const t = mesh.userData.animProgress;
+                    const easeInOut = t * t * (3 - 2 * t);
+
+                    // Interpolate using eased value
+                    mesh.scale.lerpVectors(
+                        mesh.userData.startScale,
+                        mesh.userData.targetScale,
+                        easeInOut
+                    );
+                }
+            }
+        });
     }
 
     show() {
@@ -332,8 +366,8 @@ export class OrbitalMenu {
             // Let's adjust offset based on layout.
             // Initial layout: center is at ~PI (back).
             // So if user looks at Angle, we want Group Angle to be matching.
-            
-            this.group.rotation.y = angle - Math.PI; 
+
+            this.group.rotation.y = angle - Math.PI;
         }
     }
 

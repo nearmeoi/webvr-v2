@@ -6,8 +6,8 @@ export class GazeController {
         this.raycaster = new THREE.Raycaster();
         this.center = new THREE.Vector2(0, 0); // Normalized center screen
 
-        // Reticle (Ring cursor) - smaller size
-        const geometry = new THREE.RingGeometry(0.004, 0.006, 32);
+        // Reticle (Simple dot cursor)
+        const geometry = new THREE.CircleGeometry(0.002, 32);
         const material = new THREE.MeshBasicMaterial({
             color: 0xffffff,
             opacity: 0.8,
@@ -36,7 +36,7 @@ export class GazeController {
     update(scene, interactables, delta) {
         // In WebXR, raycaster usually set from controller or camera view
         // For gaze, we cast from camera position into camera direction
-        
+
         // Use world position/direction for robust VR gaze
         const origin = new THREE.Vector3();
         const direction = new THREE.Vector3();

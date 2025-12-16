@@ -109,7 +109,7 @@ export class SubMenu {
         // Arc is smaller and lower
         const totalAngle = Math.PI * 0.5; // 90 degrees arc for tighter packing
         // Shift arc center to the left to balance audio buttons on the right
-        const centerOffset = 0.2; 
+        const centerOffset = 0.2;
         const startAngle = Math.PI + centerOffset - totalAngle / 2;
         const step = itemCount > 1 ? totalAngle / (itemCount - 1) : 0;
 
@@ -159,19 +159,22 @@ export class SubMenu {
             mesh.userData.locationData = location;
             mesh.userData.isInteractable = true;
             mesh.userData.originalScale = new THREE.Vector3(1, 1, 1);
+            mesh.userData.targetScale = new THREE.Vector3(1, 1, 1);
+            mesh.userData.animProgress = 1;
+            mesh.userData.targetOpacity = 0.5;
             mesh.userData.active = false;
 
-            // Callbacks
+            // Callbacks - use targetScale for smooth animation
             mesh.onHoverIn = () => {
                 if (!mesh.userData.active) {
-                    mesh.scale.set(1.2, 1.2, 1.2);
-                    mesh.material.opacity = 1.0; // Full visibility on hover
+                    mesh.userData.targetScale.set(1.2, 1.2, 1.2);
+                    mesh.userData.targetOpacity = 1.0;
                 }
             };
             mesh.onHoverOut = () => {
                 if (!mesh.userData.active) {
-                    mesh.scale.copy(mesh.userData.originalScale);
-                    mesh.material.opacity = 0.5; // Back to semi-transparent
+                    mesh.userData.targetScale.copy(mesh.userData.originalScale);
+                    mesh.userData.targetOpacity = 0.5;
                 }
             };
             mesh.onClick = () => {
@@ -251,8 +254,11 @@ export class SubMenu {
         this.backBtn.lookAt(0, 0.5, 0);
 
         this.backBtn.userData.isInteractable = true;
-        this.backBtn.onHoverIn = () => this.backBtn.scale.set(1.1, 1.1, 1.1);
-        this.backBtn.onHoverOut = () => this.backBtn.scale.set(1, 1, 1);
+        this.backBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
+        this.backBtn.userData.targetScale = new THREE.Vector3(1, 1, 1);
+        this.backBtn.userData.animProgress = 1;
+        this.backBtn.onHoverIn = () => this.backBtn.userData.targetScale.set(1.1, 1.1, 1.1);
+        this.backBtn.onHoverOut = () => this.backBtn.userData.targetScale.copy(this.backBtn.userData.originalScale);
         this.backBtn.onClick = () => {
             if (this.onBack) this.onBack();
         };
@@ -294,6 +300,52 @@ export class SubMenu {
         // Skip camera-following in VR mode (user can look around freely)
         if (this.isVRMode) return;
 
+        const animSpeed = 6;
+
+        // Smooth scale animation for thumbnails
+        this.thumbnails.forEach(mesh => {
+            if (mesh.userData.targetScale) {
+                const diff = mesh.scale.distanceTo(mesh.userData.targetScale);
+
+                if (diff > 0.01 && mesh.userData.animProgress >= 1) {
+                    mesh.userData.animProgress = 0;
+                    mesh.userData.startScale = mesh.scale.clone();
+                    mesh.userData.startOpacity = mesh.material.opacity;
+                }
+
+                if (mesh.userData.animProgress < 1 && mesh.userData.startScale) {
+                    mesh.userData.animProgress = Math.min(1, mesh.userData.animProgress + delta * animSpeed);
+                    // Ease-in-out (smoothstep)
+                    const t = mesh.userData.animProgress;
+                    const easeInOut = t * t * (3 - 2 * t);
+                    mesh.scale.lerpVectors(mesh.userData.startScale, mesh.userData.targetScale, easeInOut);
+
+                    // Smooth opacity transition
+                    if (mesh.userData.startOpacity !== undefined && mesh.userData.targetOpacity !== undefined) {
+                        mesh.material.opacity = mesh.userData.startOpacity + (mesh.userData.targetOpacity - mesh.userData.startOpacity) * easeInOut;
+                    }
+                }
+            }
+        });
+
+        // Smooth scale animation for back button
+        if (this.backBtn && this.backBtn.userData.targetScale) {
+            const btn = this.backBtn;
+            const diff = btn.scale.distanceTo(btn.userData.targetScale);
+
+            if (diff > 0.01 && btn.userData.animProgress >= 1) {
+                btn.userData.animProgress = 0;
+                btn.userData.startScale = btn.scale.clone();
+            }
+
+            if (btn.userData.animProgress < 1 && btn.userData.startScale) {
+                btn.userData.animProgress = Math.min(1, btn.userData.animProgress + delta * animSpeed);
+                const t = btn.userData.animProgress;
+                const easeInOut = t * t * (3 - 2 * t);
+                btn.scale.lerpVectors(btn.userData.startScale, btn.userData.targetScale, easeInOut);
+            }
+        }
+
         // Make dock follow camera's horizontal rotation (orbit only, not pitch)
         // BUT stop following when user looks DOWN toward the dock
         if (this.camera) {
@@ -332,7 +384,7 @@ export class SubMenu {
 
     show() {
         this.group.visible = true;
-        
+
         // Reset rotation to face the user
         if (this.camera) {
             const vector = new THREE.Vector3();
