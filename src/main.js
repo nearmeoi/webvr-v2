@@ -129,7 +129,7 @@ class App {
         // Main panorama viewer with dynamic back handler
         this.panoramaViewer = new PanoramaViewer(this.scene, () => {
             this.onPanoramaBack();
-        }, this.camera);
+        }, this.camera, this.renderer);
 
         // Main orbital menu (Hidden initially)
         this.orbitalMenu = new OrbitalMenu(this.scene, this.camera, (index) => {

@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { LOCATIONS } from './OrbitalMenu.js';
 
 export class PanoramaViewer {
-    constructor(scene, onBack, camera) {
+    constructor(scene, onBack, camera, renderer) {
         this.scene = scene;
         this.onBack = onBack;
         this.camera = camera;
+        this.renderer = renderer; // For WebXR camera access
         this.group = new THREE.Group();
         this.group.position.set(0, 1.6, 0); // Center everything at eye level
         this.scene.add(this.group);
@@ -602,10 +603,42 @@ export class PanoramaViewer {
             this.currentHotspots.forEach(animateObject);
         }
 
+        // === VR FIX: Sync sphere center with camera position for proper stereo ===
+        // In VR/stereo mode, the sphere MUST be centered exactly at the camera 
+        // position to prevent "double vision" where left/right eyes see different content
+        if (this.sphere) {
+            const cameraWorldPos = new THREE.Vector3();
+
+            // In WebXR mode, use the XR camera for accurate positioning
+            if (this.renderer && this.renderer.xr && this.renderer.xr.isPresenting) {
+                const xrCamera = this.renderer.xr.getCamera();
+                xrCamera.getWorldPosition(cameraWorldPos);
+            } else if (this.camera) {
+                this.camera.getWorldPosition(cameraWorldPos);
+            }
+
+            // Move the panorama sphere to follow the camera's world position
+            // This ensures both eyes see the panorama from the same center point
+            this.sphere.position.set(
+                cameraWorldPos.x - this.group.position.x,
+                cameraWorldPos.y - this.group.position.y,
+                cameraWorldPos.z - this.group.position.z
+            );
+        }
+
         // Make control dock follow camera rotation (like SubMenu)
-        if (this.camera && this.controlDock) {
+        if (this.controlDock) {
             const cameraDirection = new THREE.Vector3();
-            this.camera.getWorldDirection(cameraDirection);
+
+            // Use XR camera direction when in WebXR mode
+            if (this.renderer && this.renderer.xr && this.renderer.xr.isPresenting) {
+                const xrCamera = this.renderer.xr.getCamera();
+                xrCamera.getWorldDirection(cameraDirection);
+            } else if (this.camera) {
+                this.camera.getWorldDirection(cameraDirection);
+            } else {
+                return; // No camera available
+            }
 
             // Check if looking down
             const pitch = Math.asin(cameraDirection.y);
