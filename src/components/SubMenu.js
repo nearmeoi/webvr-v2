@@ -354,7 +354,8 @@ export class SubMenu {
             const pitch = Math.asin(cameraDirection.y); // Radians, negative = looking down
 
             // Target angle based on camera direction
-            const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI;
+            // Add centerOffset (0.2) to match the dock's shifted position
+            const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI + 0.2;
 
             // If looking down more than ~15 degrees, stop rotating (let user select)
             if (pitch > -0.26) { // -0.26 rad ≈ -15 degrees
@@ -382,12 +383,12 @@ export class SubMenu {
     show() {
         this.group.visible = true;
 
-        // Reset rotation to face the user
+        // Reset rotation to face the user (with centerOffset)
         if (this.camera) {
             const vector = new THREE.Vector3();
             this.camera.getWorldDirection(vector);
             const angle = Math.atan2(vector.x, vector.z);
-            this.group.rotation.y = angle - Math.PI;
+            this.group.rotation.y = angle - Math.PI + 0.2; // +0.2 to match centerOffset
         }
     }
 
