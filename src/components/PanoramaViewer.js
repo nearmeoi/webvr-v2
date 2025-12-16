@@ -570,9 +570,6 @@ export class PanoramaViewer {
     }
 
     update(delta) {
-        // Skip camera-following in VR mode
-        if (this.isVRMode) return;
-
         const animSpeed = 6;
 
         // Helper function for smooth animation
