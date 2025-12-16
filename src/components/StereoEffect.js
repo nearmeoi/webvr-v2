@@ -146,21 +146,45 @@ export class StereoEffect {
         this.enabled = true;
         this.renderer.setPixelRatio(1);
 
+        // Save original clear color
+        this._originalClearColor = new THREE.Color();
+        this.renderer.getClearColor(this._originalClearColor);
+        this._originalClearAlpha = this.renderer.getClearAlpha();
+
         // Create render targets at current size
         this.renderer.getSize(this._size);
-        const halfWidth = Math.floor(this._size.width / 2);
-        const height = this._size.height;
+
+        // Ensure we have valid dimensions
+        const width = Math.max(this._size.width, 100);
+        const height = Math.max(this._size.height, 100);
+        const halfWidth = Math.floor(width / 2);
+
+        console.log('StereoEffect enabling with size:', halfWidth, 'x', height);
+
+        // Dispose existing render targets if any
+        if (this.renderTargetL) {
+            this.renderTargetL.dispose();
+        }
+        if (this.renderTargetR) {
+            this.renderTargetR.dispose();
+        }
 
         this.renderTargetL = new THREE.WebGLRenderTarget(halfWidth, height, {
             minFilter: THREE.LinearFilter,
             magFilter: THREE.LinearFilter,
-            format: THREE.RGBAFormat
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType,
+            depthBuffer: true,
+            stencilBuffer: false
         });
 
         this.renderTargetR = new THREE.WebGLRenderTarget(halfWidth, height, {
             minFilter: THREE.LinearFilter,
             magFilter: THREE.LinearFilter,
-            format: THREE.RGBAFormat
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType,
+            depthBuffer: true,
+            stencilBuffer: false
         });
 
         // Update material uniforms
@@ -168,6 +192,12 @@ export class StereoEffect {
         this.quadMeshR.material.uniforms.tDiffuse.value = this.renderTargetR.texture;
         this.quadMeshL.material.uniforms.resolution.value.set(halfWidth, height);
         this.quadMeshR.material.uniforms.resolution.value.set(halfWidth, height);
+
+        // Mark materials as needing update
+        this.quadMeshL.material.needsUpdate = true;
+        this.quadMeshR.material.needsUpdate = true;
+
+        console.log('StereoEffect enabled successfully');
     }
 
     disable() {
@@ -208,49 +238,73 @@ export class StereoEffect {
             return;
         }
 
+        // Safety check - ensure render targets exist
+        if (!this.renderTargetL || !this.renderTargetR) {
+            console.warn('StereoEffect: Render targets not ready, falling back to normal render');
+            this.renderer.render(scene, camera);
+            return;
+        }
+
         this.renderer.getSize(this._size);
 
-        // Update stereo cameras
+        // Ensure valid size
+        if (this._size.width === 0 || this._size.height === 0) {
+            console.warn('StereoEffect: Invalid renderer size');
+            return;
+        }
+
+        // Update stereo cameras from the main camera
         this.stereo.update(camera);
 
-        const halfWidth = this._size.width / 2;
+        const halfWidth = Math.floor(this._size.width / 2);
 
-        // Render left eye to render target
-        this.renderer.setRenderTarget(this.renderTargetL);
-        this.renderer.clear();
-        this.renderer.render(scene, this.stereo.cameraL);
+        // Store current state
+        const currentRenderTarget = this.renderer.getRenderTarget();
+        const currentScissorTest = this.renderer.getScissorTest();
 
-        // Render right eye to render target
-        this.renderer.setRenderTarget(this.renderTargetR);
-        this.renderer.clear();
-        this.renderer.render(scene, this.stereo.cameraR);
+        try {
+            // Render left eye to render target
+            this.renderer.setRenderTarget(this.renderTargetL);
+            this.renderer.setClearColor(0x000000, 1);
+            this.renderer.clear(true, true, true);
+            this.renderer.render(scene, this.stereo.cameraL);
 
-        // Now render to screen with distortion
-        this.renderer.setRenderTarget(null);
-        this.renderer.clear();
+            // Render right eye to render target
+            this.renderer.setRenderTarget(this.renderTargetR);
+            this.renderer.clear(true, true, true);
+            this.renderer.render(scene, this.stereo.cameraR);
 
-        // Clear everything to black first
-        this.renderer.setClearColor(0x000000);
-        this.renderer.clear();
+            // Now render to screen with distortion
+            this.renderer.setRenderTarget(null);
+            this.renderer.setClearColor(0x000000, 1);
+            this.renderer.clear(true, true, true);
 
-        // Left eye with distortion
-        this.renderer.setViewport(0, 0, halfWidth, this._size.height);
-        this.renderer.setScissorTest(true);
-        this.renderer.setScissor(0, 0, halfWidth, this._size.height);
-        this.postScene.children = [this.quadMeshL];
-        this.renderer.render(this.postScene, this.orthoCamera);
+            // Left eye with distortion
+            this.renderer.setViewport(0, 0, halfWidth, this._size.height);
+            this.renderer.setScissorTest(true);
+            this.renderer.setScissor(0, 0, halfWidth, this._size.height);
+            this.postScene.children = [this.quadMeshL];
+            this.renderer.render(this.postScene, this.orthoCamera);
 
-        // Right eye with distortion
-        this.renderer.setViewport(halfWidth, 0, halfWidth, this._size.height);
-        this.renderer.setScissor(halfWidth, 0, halfWidth, this._size.height);
-        this.postScene.children = [this.quadMeshR];
-        this.renderer.render(this.postScene, this.orthoCamera);
+            // Right eye with distortion
+            this.renderer.setViewport(halfWidth, 0, halfWidth, this._size.height);
+            this.renderer.setScissor(halfWidth, 0, halfWidth, this._size.height);
+            this.postScene.children = [this.quadMeshR];
+            this.renderer.render(this.postScene, this.orthoCamera);
 
-        // Draw black divider in the middle
-        this.renderer.setScissorTest(false);
-        this.renderer.setViewport(0, 0, this._size.width, this._size.height);
-        this.postScene.children = [this.divider];
-        this.renderer.render(this.postScene, this.orthoCamera);
+            // Draw black divider in the middle
+            this.renderer.setScissorTest(false);
+            this.renderer.setViewport(0, 0, this._size.width, this._size.height);
+            this.postScene.children = [this.divider];
+            this.renderer.render(this.postScene, this.orthoCamera);
+        } catch (e) {
+            console.error('StereoEffect render error:', e);
+            // Fallback to normal render
+            this.renderer.setRenderTarget(null);
+            this.renderer.setScissorTest(false);
+            this.renderer.setViewport(0, 0, this._size.width, this._size.height);
+            this.renderer.render(scene, camera);
+        }
     }
 
     dispose() {
