@@ -245,7 +245,7 @@ export class OrbitalMenu {
 
         for (let i = 0; i < this.itemCount; i++) {
             const location = LOCATIONS[i];
-            const geometry = new THREE.PlaneGeometry(0.6, 0.4);
+            const geometry = new THREE.PlaneGeometry(0.9, 0.6); // Larger size for better visibility
 
             // Initial placeholder material
             const material = new THREE.MeshBasicMaterial({
