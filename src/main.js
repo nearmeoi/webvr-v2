@@ -6,6 +6,10 @@ import { OrbitalMenu, LOCATIONS } from './components/OrbitalMenu.js';
 import { SubMenu } from './components/SubMenu.js';
 import { PanoramaViewer } from './components/PanoramaViewer.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
+import { GyroscopeControls } from './components/GyroscopeControls.js';
+import { StereoEffect } from './components/StereoEffect.js';
+import { CardboardButton } from './components/CardboardButton.js';
+import { isIOS, isWebXRSupported, isMobile } from './utils/deviceDetection.js';
 
 class App {
     constructor() {
@@ -13,6 +17,14 @@ class App {
         document.body.appendChild(this.container);
 
         this.scene = new THREE.Scene();
+
+        // Detect iOS device
+        this.isIOSDevice = isIOS();
+        this.isMobileDevice = isMobile();
+
+        if (this.isIOSDevice) {
+            console.log('iOS device detected - Cardboard VR mode enabled');
+        }
 
         // --- IMPROVED BACKGROUND (Gradient) ---
         this.createGradientBackground();
@@ -30,12 +42,28 @@ class App {
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.xr.enabled = true;
+
+        // Only enable WebXR if NOT iOS (iOS doesn't support WebXR)
+        if (!this.isIOSDevice && isWebXRSupported()) {
+            this.renderer.xr.enabled = true;
+            document.body.appendChild(VRButton.createButton(this.renderer));
+        }
+
         this.container.appendChild(this.renderer.domElement);
 
-        document.body.appendChild(VRButton.createButton(this.renderer));
+        // iOS Cardboard Mode - Stereo rendering for VR headsets like Google Cardboard
+        this.stereoEffect = null;
+        this.isCardboardMode = false;
 
-        // Controls (for desktop debugging)
+        if (this.isIOSDevice) {
+            this.stereoEffect = new StereoEffect(this.renderer);
+            this.cardboardButton = new CardboardButton(
+                () => this.enterCardboardMode(),
+                () => this.exitCardboardMode()
+            );
+        }
+
+        // Controls (for desktop debugging and iOS fallback)
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
@@ -54,23 +82,29 @@ class App {
             this.camera.updateProjectionMatrix();
         }, { passive: false });
 
-        // VR session handling for narrower FOV
+        // VR session handling for narrower FOV (only if WebXR is enabled)
         this.isVRMode = false;
-        this.renderer.xr.addEventListener('sessionstart', () => {
-            this.camera.fov = this.vrFOV;
-            this.camera.updateProjectionMatrix();
-            this.isVRMode = true;
-            // Enable camera-following in VR
-            if (this.subMenu) this.subMenu.setVRMode(true);
-            this.panoramaViewer.setVRMode(true);
-        });
-        this.renderer.xr.addEventListener('sessionend', () => {
-            this.camera.fov = this.defaultFOV;
-            this.camera.updateProjectionMatrix();
-            this.isVRMode = false;
-            if (this.subMenu) this.subMenu.setVRMode(false);
-            this.panoramaViewer.setVRMode(false);
-        });
+        if (this.renderer.xr.enabled) {
+            this.renderer.xr.addEventListener('sessionstart', () => {
+                this.camera.fov = this.vrFOV;
+                this.camera.updateProjectionMatrix();
+                this.isVRMode = true;
+                // Enable camera-following in VR
+                if (this.subMenu) this.subMenu.setVRMode(true);
+                this.panoramaViewer.setVRMode(true);
+            });
+            this.renderer.xr.addEventListener('sessionend', () => {
+                this.camera.fov = this.defaultFOV;
+                this.camera.updateProjectionMatrix();
+                this.isVRMode = false;
+                if (this.subMenu) this.subMenu.setVRMode(false);
+                this.panoramaViewer.setVRMode(false);
+            });
+        }
+
+        // Gyroscope controls for iOS (fallback for VR-like experience)
+        this.gyroscopeControls = null;
+        this.gyroscopeEnabled = false;
 
         // Lights
         const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
@@ -83,8 +117,12 @@ class App {
         // Components
         this.gazeController = new GazeController(this.camera);
 
-        // Welcome Screen
-        this.welcomeScreen = new WelcomeScreen(this.scene, () => {
+        // Welcome Screen - also handles gyroscope permission request on iOS
+        this.welcomeScreen = new WelcomeScreen(this.scene, async () => {
+            // Request gyroscope permission on iOS when user taps Start
+            if (this.isIOSDevice && !this.gyroscopeEnabled) {
+                await this.initGyroscope();
+            }
             this.onWelcomeStart();
         });
 
@@ -229,6 +267,79 @@ class App {
         this.orbitalMenu.show();
     }
 
+    /**
+     * Initialize gyroscope controls for iOS devices
+     * Must be called after a user gesture (tap/click)
+     */
+    async initGyroscope() {
+        if (this.gyroscopeEnabled) return;
+
+        this.gyroscopeControls = new GyroscopeControls(this.camera, this.renderer.domElement);
+        const success = await this.gyroscopeControls.enable();
+
+        if (success) {
+            this.gyroscopeEnabled = true;
+            // Optionally disable OrbitControls when gyroscope is active
+            // Or keep both enabled for hybrid control
+            console.log('Gyroscope controls initialized for iOS');
+        } else {
+            console.log('Gyroscope initialization failed, falling back to touch controls');
+        }
+    }
+
+    /**
+     * Enter iOS Cardboard Mode (split-screen stereo VR)
+     */
+    async enterCardboardMode() {
+        if (this.isCardboardMode) return;
+
+        // Initialize gyroscope if not already done
+        if (!this.gyroscopeEnabled) {
+            await this.initGyroscope();
+        }
+
+        // Enable stereo effect
+        if (this.stereoEffect) {
+            this.stereoEffect.enable();
+        }
+
+        // Disable OrbitControls in cardboard mode (gyroscope takes over)
+        if (this.controls) {
+            this.controls.enabled = false;
+        }
+
+        // Set VR-like camera settings
+        this.camera.fov = this.vrFOV;
+        this.camera.updateProjectionMatrix();
+
+        this.isCardboardMode = true;
+        console.log('Entered Cardboard VR mode');
+    }
+
+    /**
+     * Exit iOS Cardboard Mode
+     */
+    exitCardboardMode() {
+        if (!this.isCardboardMode) return;
+
+        // Disable stereo effect
+        if (this.stereoEffect) {
+            this.stereoEffect.disable();
+        }
+
+        // Re-enable OrbitControls
+        if (this.controls) {
+            this.controls.enabled = true;
+        }
+
+        // Reset camera
+        this.camera.fov = this.defaultFOV;
+        this.camera.updateProjectionMatrix();
+
+        this.isCardboardMode = false;
+        console.log('Exited Cardboard VR mode');
+    }
+
     onWindowResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
@@ -240,6 +351,11 @@ class App {
 
         // Update controls
         if (this.controls) this.controls.update();
+
+        // Update gyroscope controls if enabled (iOS)
+        if (this.gyroscopeControls && this.gyroscopeEnabled) {
+            this.gyroscopeControls.update();
+        }
 
         // Update gaze - check VISIBLE groups only
         const interactables = [];
@@ -261,8 +377,12 @@ class App {
         this.orbitalMenu.update(delta);
         if (this.subMenu) this.subMenu.update(delta);
         this.panoramaViewer.update(delta);
-
-        this.renderer.render(this.scene, this.camera);
+        // Render - use stereo effect if in Cardboard mode (iOS)
+        if (this.isCardboardMode && this.stereoEffect) {
+            this.stereoEffect.render(this.scene, this.camera);
+        } else {
+            this.renderer.render(this.scene, this.camera);
+        }
     }
 }
 
