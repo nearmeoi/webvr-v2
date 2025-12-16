@@ -152,7 +152,7 @@ export class OrbitalMenu {
         this.scene.add(this.group);
 
         this.thumbnails = [];
-        this.radius = 1.5; // Meters from user
+        this.radius = 2.5; // Meters from user (comfortable VR distance)
         this.itemCount = LOCATIONS.length;
         this.textureLoader = new THREE.TextureLoader();
 

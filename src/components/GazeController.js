@@ -8,17 +8,18 @@ export class GazeController {
         this.center = new THREE.Vector2(0, 0); // Normalized center screen
 
         // Reticle (Simple dot cursor)
-        // NOTE: In VR, reticle must be FAR from camera to minimize parallax
-        // between left and right eye views. We use z=-10 and scale up accordingly.
-        const reticleDistance = 10; // Far enough to minimize stereo parallax
-        const reticleSize = 0.04; // Size at distance 10 to appear similar to 0.002 at 0.5
+        // Position reticle CLOSER than menu items so it appears in front
+        // Menu is at radius 1.5m, so reticle at 1.0m will be in front
+        const reticleDistance = 1.0; // Closer than menu (1.5m)
+        const reticleSize = 0.008; // Smaller size for closer distance
 
         const geometry = new THREE.CircleGeometry(reticleSize, 32);
         const material = new THREE.MeshBasicMaterial({
             color: 0xffffff,
-            opacity: 0.8,
+            opacity: 0.9,
             transparent: true,
-            depthTest: false
+            depthTest: false,
+            depthWrite: false
         });
         this.mesh = new THREE.Mesh(geometry, material);
         this.mesh.position.set(0, 0, -reticleDistance);
