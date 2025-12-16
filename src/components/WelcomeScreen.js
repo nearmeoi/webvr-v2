@@ -9,9 +9,8 @@ export class WelcomeScreen {
 
         this.createContent();
 
-        // Rotate the welcome screen slightly to the right at startup
-        // to avoid the Start button being directly in the center
-        this.group.rotation.y = Math.PI * 0.1; // Rotate ~18 degrees to the right
+        // Welcome screen is centered for VR alignment
+        this.group.rotation.y = 0;
     }
 
     createContent() {
