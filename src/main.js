@@ -61,6 +61,7 @@ class App {
                 () => this.enterCardboardMode(),
                 () => this.exitCardboardMode()
             );
+            this.createVignette();
         }
 
         // Controls (for desktop debugging and iOS fallback)
@@ -143,6 +144,46 @@ class App {
         window.addEventListener('resize', this.onWindowResize.bind(this));
 
         this.renderer.setAnimationLoop(this.render.bind(this));
+    }
+
+    createVignette() {
+        this.vignette = document.createElement('div');
+        Object.assign(this.vignette.style, {
+            position: 'fixed',
+            top: '0',
+            left: '0',
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            display: 'none',
+            zIndex: '998' // Below VR button (999)
+        });
+
+        // Left Eye Vignette
+        const leftEye = document.createElement('div');
+        Object.assign(leftEye.style, {
+            position: 'absolute',
+            left: '0',
+            top: '0',
+            width: '50%',
+            height: '100%',
+            background: 'radial-gradient(circle at center, transparent 50%, black 50.5%)'
+        });
+
+        // Right Eye Vignette
+        const rightEye = document.createElement('div');
+        Object.assign(rightEye.style, {
+            position: 'absolute',
+            right: '0',
+            top: '0',
+            width: '50%',
+            height: '100%',
+            background: 'radial-gradient(circle at center, transparent 50%, black 50.5%)'
+        });
+
+        this.vignette.appendChild(leftEye);
+        this.vignette.appendChild(rightEye);
+        document.body.appendChild(this.vignette);
     }
 
     createGradientBackground() {
@@ -303,6 +344,11 @@ class App {
             this.stereoEffect.enable();
         }
 
+        // Show Vignette
+        if (this.vignette) {
+            this.vignette.style.display = 'block';
+        }
+
         // Disable OrbitControls in cardboard mode (gyroscope takes over)
         if (this.controls) {
             this.controls.enabled = false;
@@ -325,6 +371,11 @@ class App {
         // Disable stereo effect
         if (this.stereoEffect) {
             this.stereoEffect.disable();
+        }
+
+        // Hide Vignette
+        if (this.vignette) {
+            this.vignette.style.display = 'none';
         }
 
         // Re-enable OrbitControls
@@ -377,6 +428,7 @@ class App {
         this.orbitalMenu.update(delta);
         if (this.subMenu) this.subMenu.update(delta);
         this.panoramaViewer.update(delta);
+        // Render - use stereo effect if in Cardboard mode (iOS)
         // Render - use stereo effect if in Cardboard mode (iOS)
         if (this.isCardboardMode && this.stereoEffect) {
             this.stereoEffect.render(this.scene, this.camera);

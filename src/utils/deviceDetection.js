@@ -8,9 +8,8 @@
  * Includes detection for iPadOS (which reports as MacIntel)
  */
 export function isIOS() {
-    return false; // FORCE FALSE for WebXR testing
-    // return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    //     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
 /**

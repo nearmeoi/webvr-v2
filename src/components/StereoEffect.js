@@ -32,7 +32,8 @@ export class StereoEffect {
         this.quadMeshR = new THREE.Mesh(this.quadGeometry, this.distortionMaterial.clone());
 
         // Orthographic camera for post-processing
-        this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
+        this.orthoCamera.position.z = 1;
 
         // Scene for post-processing
         this.postScene = new THREE.Scene();
@@ -117,7 +118,8 @@ export class StereoEffect {
             vertexShader,
             fragmentShader,
             depthTest: false,
-            depthWrite: false
+            depthWrite: false,
+            side: THREE.DoubleSide
         });
     }
 
@@ -263,40 +265,27 @@ export class StereoEffect {
         const currentScissorTest = this.renderer.getScissorTest();
 
         try {
-            // Render left eye to render target
-            this.renderer.setRenderTarget(this.renderTargetL);
+            // Update stereo cameras from the main camera
+            this.stereo.update(camera);
+
+            const width = this._size.width;
+            const height = this._size.height;
+
+            this.renderer.setScissorTest(true);
             this.renderer.setClearColor(0x000000, 1);
-            this.renderer.clear(true, true, true);
+            this.renderer.clearColor(); // Clear color buffer
+
+            // Render Left Eye
+            this.renderer.setScissor(0, 0, width / 2, height);
+            this.renderer.setViewport(0, 0, width / 2, height);
             this.renderer.render(scene, this.stereo.cameraL);
 
-            // Render right eye to render target
-            this.renderer.setRenderTarget(this.renderTargetR);
-            this.renderer.clear(true, true, true);
+            // Render Right Eye
+            this.renderer.setScissor(width / 2, 0, width / 2, height);
+            this.renderer.setViewport(width / 2, 0, width / 2, height);
             this.renderer.render(scene, this.stereo.cameraR);
 
-            // Now render to screen with distortion
-            this.renderer.setRenderTarget(null);
-            this.renderer.setClearColor(0x000000, 1);
-            this.renderer.clear(true, true, true);
-
-            // Left eye with distortion
-            this.renderer.setViewport(0, 0, halfWidth, this._size.height);
-            this.renderer.setScissorTest(true);
-            this.renderer.setScissor(0, 0, halfWidth, this._size.height);
-            this.postScene.children = [this.quadMeshL];
-            this.renderer.render(this.postScene, this.orthoCamera);
-
-            // Right eye with distortion
-            this.renderer.setViewport(halfWidth, 0, halfWidth, this._size.height);
-            this.renderer.setScissor(halfWidth, 0, halfWidth, this._size.height);
-            this.postScene.children = [this.quadMeshR];
-            this.renderer.render(this.postScene, this.orthoCamera);
-
-            // Draw black divider in the middle
             this.renderer.setScissorTest(false);
-            this.renderer.setViewport(0, 0, this._size.width, this._size.height);
-            this.postScene.children = [this.divider];
-            this.renderer.render(this.postScene, this.orthoCamera);
         } catch (e) {
             console.error('StereoEffect render error:', e);
             // Fallback to normal render
