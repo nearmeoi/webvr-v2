@@ -833,5 +833,15 @@ export class PanoramaViewer {
 
     setVRMode(isVR) {
         this.isVRMode = isVR;
+
+        // Hide standard controls in VR mode (using tailored VR controls or Cardboard UI instead)
+        if (this.controlDock) {
+            // We might want to keep audio controls but hide back button? 
+            // For now, let's keep audio visible but hide Back button which is duplicated by CardboardUI
+            // actually, CardboardUI replaces the interactions.
+            // If we hide the whole dock, we lose audio.
+            // Let's just hide the back button for now.
+            this.setBackButtonVisibility(!isVR);
+        }
     }
 }

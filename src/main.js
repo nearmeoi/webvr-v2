@@ -8,6 +8,7 @@ import { PanoramaViewer } from './components/PanoramaViewer.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { GyroscopeControls } from './components/GyroscopeControls.js';
 import { StereoEffect } from './components/StereoEffect.js';
+import { CardboardUI } from './components/CardboardUI.js';
 import { CardboardButton } from './components/CardboardButton.js';
 import { isIOS, isWebXRSupported, isMobile, isCardboardForced } from './utils/deviceDetection.js';
 
@@ -17,6 +18,12 @@ class App {
         document.body.appendChild(this.container);
 
         this.scene = new THREE.Scene();
+
+        // UI for Cardboard Mode
+        this.cardboardUI = new CardboardUI(
+            () => this.exitCardboardMode(), // On Back
+            () => console.log('Settings clicked') // On Settings (placeholder)
+        );
 
         // Detect iOS device OR forced Cardboard mode via URL (?cardboard=true)
         this.isIOSDevice = isIOS() || isCardboardForced();
@@ -147,6 +154,8 @@ class App {
     }
 
     createVignette() {
+        // Vignette removed for full screen Cardboard view
+        /*
         this.vignette = document.createElement('div');
         Object.assign(this.vignette.style, {
             position: 'fixed',
@@ -184,6 +193,7 @@ class App {
         this.vignette.appendChild(leftEye);
         this.vignette.appendChild(rightEye);
         document.body.appendChild(this.vignette);
+        */
     }
 
     createGradientBackground() {
@@ -349,6 +359,18 @@ class App {
             this.vignette.style.display = 'block';
         }
 
+        // Request Fullscreen
+        const el = document.documentElement;
+        if (el.requestFullscreen) {
+            el.requestFullscreen().catch(e => console.log('Fullscreen blocked:', e));
+        } else if (el.webkitRequestFullscreen) {
+            el.webkitRequestFullscreen();
+        } else if (el.mozRequestFullScreen) {
+            el.mozRequestFullScreen();
+        } else if (el.msRequestFullscreen) {
+            el.msRequestFullscreen();
+        }
+
         // Disable OrbitControls in cardboard mode (gyroscope takes over)
         // ENABLED FOR TESTING: User request to allow dragging
         /*
@@ -362,6 +384,15 @@ class App {
         this.camera.updateProjectionMatrix();
 
         this.isCardboardMode = true;
+
+        this.isCardboardMode = true;
+
+        // Let components know we are in a VR-like mode
+        if (this.panoramaViewer) this.panoramaViewer.setVRMode(true);
+
+        // Show 2D UI Overlay
+        if (this.cardboardUI) this.cardboardUI.show();
+
         console.log('Entered Cardboard VR mode');
     }
 
@@ -370,6 +401,27 @@ class App {
      */
     exitCardboardMode() {
         if (!this.isCardboardMode) return;
+
+        // Force exit fullscreen (handle all vendor prefixes)
+        try {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.mozCancelFullScreen) {
+                document.mozCancelFullScreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+        } catch (e) {
+            console.log('Exit fullscreen error:', e);
+        }
+
+        // Sync CardboardButton state if it exists
+        if (this.cardboardButton) {
+            this.cardboardButton.isInVR = false;
+            this.cardboardButton.updateButtonStyle(false);
+        }
 
         // Disable stereo effect
         if (this.stereoEffect) {
@@ -391,6 +443,13 @@ class App {
         this.camera.updateProjectionMatrix();
 
         this.isCardboardMode = false;
+
+        // Reset VR mode in components
+        if (this.panoramaViewer) this.panoramaViewer.setVRMode(false);
+
+        // Hide 2D UI Overlay
+        if (this.cardboardUI) this.cardboardUI.hide();
+
         console.log('Exited Cardboard VR mode');
     }
 

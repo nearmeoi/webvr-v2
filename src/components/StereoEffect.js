@@ -58,63 +58,29 @@ export class StereoEffect {
             uniform vec2 resolution;
             uniform float distortion;
             uniform float vignetteStrength;
-            uniform float vignetteSize;
             
             varying vec2 vUv;
-            
-            vec2 barrelDistortion(vec2 coord) {
-                vec2 cc = coord - 0.5;
-                float dist = dot(cc, cc);
+
+        void main() {
+                // Pass-through without distortion for rectangular view
+                vec2 uv = vUv;
                 
-                // Barrel distortion formula
-                float distortionFactor = 1.0 + dist * distortion;
-                
-                return cc * distortionFactor + 0.5;
-            }
-            
-            void main() {
-                // Apply barrel distortion
-                vec2 distortedUV = barrelDistortion(vUv);
-                
-                // Check if UV is out of bounds (creates black edges)
-                if (distortedUV.x < 0.0 || distortedUV.x > 1.0 || 
-                    distortedUV.y < 0.0 || distortedUV.y > 1.0) {
-                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-                    return;
-                }
-                
-                vec4 color = texture2D(tDiffuse, distortedUV);
-                
-                // Apply vignette (dark edges like real lens)
-                vec2 center = vUv - 0.5;
-                float vignette = 1.0 - smoothstep(vignetteSize, vignetteSize + 0.3, length(center) * 2.0);
-                vignette = mix(1.0, vignette, vignetteStrength);
-                
-                // Circular mask (makes it look like looking through lens)
-                float circleMask = 1.0 - smoothstep(0.45, 0.5, length(center));
-                
-                color.rgb *= vignette;
-                color.rgb *= circleMask;
-                
-                // Add subtle chromatic aberration at edges
-                float chromaAmount = length(center) * 0.02;
-                float r = texture2D(tDiffuse, distortedUV + vec2(chromaAmount, 0.0)).r;
-                float b = texture2D(tDiffuse, distortedUV - vec2(chromaAmount, 0.0)).b;
-                color.r = mix(color.r, r, 0.3);
-                color.b = mix(color.b, b, 0.3);
-                
-                gl_FragColor = color;
-            }
+                vec4 color = texture2D(tDiffuse, uv);
+
+            // Vignette removed
+
+            gl_FragColor = color;
+        }
         `;
 
         return new THREE.ShaderMaterial({
             uniforms: {
                 tDiffuse: { value: null },
                 resolution: { value: new THREE.Vector2() },
-                distortion: { value: 0.2 }, // Barrel distortion strength
-                vignetteStrength: { value: 0.8 }, // How dark edges get
-                vignetteSize: { value: 0.4 } // Where vignette starts
+                distortion: { value: 0.0 }, // Disabled
+                vignetteStrength: { value: 0.0 } // Disabled
             },
+
             vertexShader,
             fragmentShader,
             depthTest: false,
@@ -124,12 +90,14 @@ export class StereoEffect {
     }
 
     createDivider() {
-        // Black divider in the middle - simulates headset nose piece
-        const dividerGeometry = new THREE.PlaneGeometry(0.02, 2);
+        // Divider is now handled by 2D UI overlay, hiding this 3D one or keeping it as backup
+        // Keeping it invisible for now to rely on UI overlay
+        const dividerGeometry = new THREE.PlaneGeometry(0.002, 2); // Thinner
         const dividerMaterial = new THREE.MeshBasicMaterial({
             color: 0x000000,
             depthTest: false,
-            depthWrite: false
+            depthWrite: false,
+            visible: false // Hiding 3D divider
         });
         this.divider = new THREE.Mesh(dividerGeometry, dividerMaterial);
         this.divider.position.set(0, 0, -0.5);
