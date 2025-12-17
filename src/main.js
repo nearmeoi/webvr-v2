@@ -350,9 +350,12 @@ class App {
         }
 
         // Disable OrbitControls in cardboard mode (gyroscope takes over)
+        // ENABLED FOR TESTING: User request to allow dragging
+        /*
         if (this.controls) {
             this.controls.enabled = false;
         }
+        */
 
         // Set VR-like camera settings
         this.camera.fov = this.vrFOV;

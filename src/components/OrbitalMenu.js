@@ -14,17 +14,49 @@ export const LOCATIONS = [
         id: 1,
         name: 'Losari Beach',
         thumbnail: '/Virtual Tour Development/Losari Beach/Thumbnail Losari.jpg',
-        panorama: '/Virtual Tour Development/Losari Beach/1.jpg',
+        panorama: null,
         audio: '/Virtual Tour Development/Losari Beach/Pantai Losari - Made with Clipchamp.m4a',
-        subLocations: null
+        subLocations: null,
+        scenes: [
+            {
+                id: '1',
+                path: '/Virtual Tour Development/Losari Beach/1.jpg',
+                links: [
+                    { target: '3', label: 'Kanan', angle: 90 }  // Right
+                ]
+            },
+            {
+                id: '3',
+                path: '/Virtual Tour Development/Losari Beach/3-kanan.jpg',
+                links: [
+                    { target: '1', label: 'Kembali', angle: 270 } // Back to center (Left relative to here)
+                ]
+            }
+        ]
     },
     {
         id: 2,
         name: 'Malino',
         thumbnail: '/Virtual Tour Development/Malino/Thumbnail Malino.jpg',
-        panorama: '/Virtual Tour Development/Malino/1.jpg',
+        panorama: null,
         audio: '/Virtual Tour Development/Malino/Malino - Made with Clipchamp.m4a',
-        subLocations: null
+        subLocations: null,
+        scenes: [
+            {
+                id: '1',
+                path: '/Virtual Tour Development/Malino/1.jpg',
+                links: [
+                    { target: '2', label: 'Maju', angle: 10 } // Slightly right of center
+                ]
+            },
+            {
+                id: '2',
+                path: '/Virtual Tour Development/Malino/2.jpg',
+                links: [
+                    { target: '1', label: 'Kembali', angle: 180 } // Back
+                ]
+            }
+        ]
     },
     {
         id: 3,

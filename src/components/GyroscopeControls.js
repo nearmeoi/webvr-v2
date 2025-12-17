@@ -79,6 +79,9 @@ export class GyroscopeControls {
     onDeviceOrientation(event) {
         if (!this.enabled) return;
 
+        // Check for valid data (iOS sometimes sends nulls initially)
+        if (event.alpha === null || event.beta === null || event.gamma === null) return;
+
         this.deviceOrientation = {
             alpha: event.alpha || 0,  // Z axis (compass direction)
             beta: event.beta || 0,    // X axis (front-to-back tilt)
@@ -92,6 +95,14 @@ export class GyroscopeControls {
 
     update() {
         if (!this.enabled) return;
+
+        // Skip if we haven't received valid orientation yet (prevent camera drop)
+        // A perfectly flat device (0,0,0) is unlikely in VR use case (vertical face)
+        if (this.deviceOrientation.alpha === 0 &&
+            this.deviceOrientation.beta === 0 &&
+            this.deviceOrientation.gamma === 0) {
+            return;
+        }
 
         const alpha = THREE.MathUtils.degToRad(this.deviceOrientation.alpha);
         const beta = THREE.MathUtils.degToRad(this.deviceOrientation.beta);

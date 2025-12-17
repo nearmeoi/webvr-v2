@@ -11,7 +11,7 @@ export class StereoEffect {
 
         // Stereo camera setup
         this.stereo = new THREE.StereoCamera();
-        this.stereo.eyeSep = 0.064; // Average human IPD
+        this.stereo.eyeSep = 0.064; // Default IPD
 
         // Store original renderer settings
         this._size = new THREE.Vector2();
@@ -266,7 +266,17 @@ export class StereoEffect {
 
         try {
             // Update stereo cameras from the main camera
+            camera.updateMatrixWorld(); // Ensure camera matrix is up to date
+
+            const originalAspect = camera.aspect;
+            camera.aspect = (this._size.width / 2) / this._size.height;
+            camera.updateProjectionMatrix();
+
             this.stereo.update(camera);
+
+            // Restore original aspect ratio
+            camera.aspect = originalAspect;
+            camera.updateProjectionMatrix();
 
             const width = this._size.width;
             const height = this._size.height;

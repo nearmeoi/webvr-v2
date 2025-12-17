@@ -436,8 +436,17 @@ export class PanoramaViewer {
             const cachedTexture = this.textureCache.get(path);
             this.material.map = cachedTexture;
             this.material.needsUpdate = true;
-            return; // No loading needed
+            this.hideLoading(); // Ensure loading is hidden immediately
+            return;
         }
+
+        // If already loading this specific texture as a main request, just show loading
+        // If it was a background preload, we might want to "promote" it or just wait.
+        // For simplicity, we'll just wait for the existing promise/callback if we could hooked into it, 
+        // but Three.js TextureLoader doesn't return a promise we can easily attach to for the *same* request object usually.
+        // multi-request handling: if we initiate a standard load, and one is pending, we can't easily jump onto the pending one's callback 
+        // without a custom manager. 
+        // EASIER FIX: just let it load. BUT, let's stop *Preloads* from spamming.
 
         // Show loading indicator
         this.showLoading();
@@ -455,7 +464,10 @@ export class PanoramaViewer {
                 // Hide loading indicator
                 this.hideLoading();
             },
-            undefined,
+            (xhr) => {
+                // Progress
+                // console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
             (error) => {
                 console.error('Error loading panorama:', error);
                 this.loadFallbackTexture('Error Loading');
@@ -467,9 +479,16 @@ export class PanoramaViewer {
     // Preload multiple textures in background (lazy loading)
     preloadTextures(paths) {
         if (!this.textureCache) this.textureCache = new Map();
+        if (!this.pendingTextures) this.pendingTextures = new Set();
 
         paths.forEach(path => {
+            // Skip if already cached OR matches current texture (optimization)
             if (!path || this.textureCache.has(path)) return;
+
+            // Skip if already being loaded
+            if (this.pendingTextures.has(path)) return;
+
+            this.pendingTextures.add(path); // Mark as pending
 
             // Load in background without showing loading indicator
             this.textureLoader.load(
@@ -477,11 +496,13 @@ export class PanoramaViewer {
                 (texture) => {
                     texture.colorSpace = THREE.SRGBColorSpace;
                     this.textureCache.set(path, texture);
+                    this.pendingTextures.delete(path); // Remove from pending
                     console.log('Preloaded texture:', path);
                 },
                 undefined,
                 (error) => {
                     console.warn('Failed to preload:', path, error);
+                    this.pendingTextures.delete(path); // Remove from pending on error too
                 }
             );
         });
@@ -644,9 +665,18 @@ export class PanoramaViewer {
         mesh.onHoverIn = () => mesh.userData.targetScale.set(1.3, 1.3, 1.3);
         mesh.onHoverOut = () => mesh.userData.targetScale.copy(mesh.userData.originalScale);
         mesh.onClick = () => {
+            console.log('Clicked hotspot:', linkData.label, 'Target:', linkData.target);
+            if (!this.currentLocation || !this.currentLocation.scenes) {
+                console.error('No scenes data found for current location');
+                return;
+            }
             const nextScene = this.currentLocation.scenes.find(s => s.id === linkData.target);
             if (nextScene) {
+                console.log('Transitioning to scene:', nextScene.id);
                 this.loadScene(nextScene);
+            } else {
+                console.error('Target scene not found:', linkData.target);
+                console.log('Available scenes:', this.currentLocation.scenes.map(s => s.id));
             }
         };
 
@@ -784,7 +814,7 @@ export class PanoramaViewer {
 
             // Check if looking down
             const pitch = Math.asin(cameraDirection.y);
-            const targetAngle = -Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI;
+            const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI;
 
             // Only rotate when NOT looking down at controls
             if (pitch > -0.45) { // -0.45 rad ≈ -26 degrees (lowered threshold)
