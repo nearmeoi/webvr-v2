@@ -16,6 +16,8 @@ export const LOCATIONS = [
         thumbnail: '/Virtual Tour Development/Losari Beach/Thumbnail Losari.jpg',
         panorama: null,
         audio: '/Virtual Tour Development/Losari Beach/Pantai Losari - Made with Clipchamp.m4a',
+        // Side-by-side stereo video for VR (replaces 360 photo experience)
+        stereoVideo: '/Virtual Tour Development/Losari Beach/VT Panlos.mp4',
         subLocations: null,
         scenes: [
             {

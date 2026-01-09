@@ -5,13 +5,14 @@ import { GazeController } from './components/GazeController.js';
 import { OrbitalMenu, LOCATIONS } from './components/OrbitalMenu.js';
 import { SubMenu } from './components/SubMenu.js';
 import { PanoramaViewer } from './components/PanoramaViewer.js';
+import { StereoVideoPlayer } from './components/StereoVideoPlayer.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { GyroscopeControls } from './components/GyroscopeControls.js';
 import { StereoEffect } from './components/StereoEffect.js';
 import { CardboardUI } from './components/CardboardUI.js';
 import { CardboardButton } from './components/CardboardButton.js';
 import { isIOS, isWebXRSupported, isMobile, isCardboardForced } from './utils/deviceDetection.js';
-
+    
 class App {
     constructor() {
         this.container = document.createElement('div');
@@ -139,6 +140,11 @@ class App {
             this.onPanoramaBack();
         }, this.camera, this.renderer);
 
+        // Stereo video player for side-by-side VR videos
+        this.stereoVideoPlayer = new StereoVideoPlayer(this.scene, this.camera, this.renderer, () => {
+            this.onVideoBack();
+        });
+
         // Main orbital menu (Hidden initially)
         this.orbitalMenu = new OrbitalMenu(this.scene, this.camera, (index) => {
             this.onMainMenuSelect(index);
@@ -253,6 +259,22 @@ class App {
             this.panoramaViewer.setAudioButtonsPosition('with-dock');
 
             this.currentState = 'toraja-mode';
+        } else if (location.stereoVideo) {
+            // Stereo Video Mode: Fullscreen side-by-side VR video
+            this.orbitalMenu.hide();
+            this.currentState = 'stereo-video';
+            this.currentSubMenuParent = null;
+            this.stereoVideoPlayer.load(location.stereoVideo, true);
+
+            // Disable camera controls for focused video viewing
+            if (this.controls) {
+                this.controls.enabled = false;
+            }
+
+            // Enable stereo mode if in Cardboard mode
+            if (this.isCardboardMode) {
+                this.stereoVideoPlayer.setStereoMode(true);
+            }
         } else {
             // Standard Mode: Zoom into panorama
             this.orbitalMenu.hide();
@@ -316,6 +338,18 @@ class App {
         this.panoramaViewer.hide();
         this.currentState = 'main-menu';
         this.orbitalMenu.show();
+    }
+
+    onVideoBack() {
+        // Back from stereo video player
+        this.stereoVideoPlayer.hide();
+        this.currentState = 'main-menu';
+        this.orbitalMenu.show();
+
+        // Re-enable camera controls
+        if (this.controls) {
+            this.controls.enabled = true;
+        }
     }
 
     /**
@@ -482,6 +516,7 @@ class App {
         if (this.orbitalMenu.group.visible) interactables.push(this.orbitalMenu.group);
         if (this.subMenu && this.subMenu.group.visible) interactables.push(this.subMenu.group);
         if (this.panoramaViewer.group.visible) interactables.push(this.panoramaViewer.group);
+        if (this.stereoVideoPlayer && this.stereoVideoPlayer.group.visible) interactables.push(this.stereoVideoPlayer.group);
 
         this.gazeController.update(this.scene, interactables, delta);
 
@@ -490,6 +525,7 @@ class App {
         this.orbitalMenu.update(delta);
         if (this.subMenu) this.subMenu.update(delta);
         this.panoramaViewer.update(delta);
+        if (this.stereoVideoPlayer) this.stereoVideoPlayer.update(delta);
         // Render - use stereo effect if in Cardboard mode (iOS)
         // Render - use stereo effect if in Cardboard mode (iOS)
         if (this.isCardboardMode && this.stereoEffect) {
