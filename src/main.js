@@ -12,7 +12,7 @@ import { StereoEffect } from './components/StereoEffect.js';
 import { CardboardUI } from './components/CardboardUI.js';
 import { CardboardButton } from './components/CardboardButton.js';
 import { isIOS, isWebXRSupported, isMobile, isCardboardForced } from './utils/deviceDetection.js';
-    
+
 class App {
     constructor() {
         this.container = document.createElement('div');
@@ -141,9 +141,26 @@ class App {
         }, this.camera, this.renderer);
 
         // Stereo video player for side-by-side VR videos
-        this.stereoVideoPlayer = new StereoVideoPlayer(this.scene, this.camera, this.renderer, () => {
-            this.onVideoBack();
-        });
+        this.stereoVideoPlayer = new StereoVideoPlayer(
+            this.scene,
+            this.camera,
+            this.renderer,
+            () => {
+                this.onVideoBack();
+            },
+            () => {
+                // On Enter VR request (from video player)
+                if (this.isMobileDevice || this.isIOSDevice) {
+                    this.enterCardboardMode();
+                }
+            },
+            () => {
+                // On Exit VR request (from video player)
+                if (this.isCardboardMode) {
+                    this.exitCardboardMode();
+                }
+            }
+        );
 
         // Main orbital menu (Hidden initially)
         this.orbitalMenu = new OrbitalMenu(this.scene, this.camera, (index) => {
@@ -157,6 +174,60 @@ class App {
         window.addEventListener('resize', this.onWindowResize.bind(this));
 
         this.renderer.setAnimationLoop(this.render.bind(this));
+
+        // Initialize Landing Screen logic
+        this.initLandingScreen();
+    }
+
+    initLandingScreen() {
+        const landingScreen = document.getElementById('landing-screen');
+        const enterBtn = document.getElementById('enter-vr-btn');
+
+        if (enterBtn) {
+            enterBtn.addEventListener('click', async () => {
+                // 1. Request Fullscreen
+                const el = document.documentElement;
+                if (el.requestFullscreen) {
+                    await el.requestFullscreen().catch(e => console.log('Fullscreen blocked:', e));
+                } else if (el.webkitRequestFullscreen) {
+                    el.webkitRequestFullscreen();
+                }
+
+                // 2. Lock Landscape
+                try {
+                    if (screen.orientation && screen.orientation.lock) {
+                        screen.orientation.lock('landscape').catch(e => console.log('Orientation lock warning:', e));
+                    } else if (window.screen && window.screen.lockOrientation) {
+                        window.screen.lockOrientation('landscape');
+                    }
+                } catch (e) {
+                    console.warn('Rotation lock not supported');
+                }
+
+                // 3. Audio Context Resume (if needed for future audio)
+                if (THREE.AudioContext && THREE.AudioContext.state === 'suspended') {
+                    THREE.AudioContext.resume();
+                }
+
+                // 4. Hide Landing Screen
+                landingScreen.style.opacity = '0';
+                setTimeout(() => {
+                    landingScreen.style.display = 'none';
+                }, 500);
+
+                // 5. Enter VR Mode
+                // Show Welcome Screen first (Default Entry)
+                this.orbitalMenu.hide(); // Ensure Menu is hidden!
+                if (this.welcomeScreen) this.welcomeScreen.show();
+
+                // Slight delay to ensure fullscreen is active before splitting screen
+                setTimeout(() => {
+                    if (this.isMobileDevice || this.isIOSDevice) {
+                        this.enterCardboardMode();
+                    }
+                }, 100);
+            });
+        }
     }
 
     createVignette() {
@@ -264,11 +335,28 @@ class App {
             this.orbitalMenu.hide();
             this.currentState = 'stereo-video';
             this.currentSubMenuParent = null;
-            this.stereoVideoPlayer.load(location.stereoVideo, true);
+
+            if (location.projection === 'flat') {
+                // Flat mode: specific request for 2D HTML only.
+                // MUST EXIT VR (Stereo) Mode because pure HTML cannot be split-screened.
+                if (this.isCardboardMode) {
+                    this.exitCardboardMode();
+                }
+                this.stereoVideoPlayer.play2D(location.stereoVideo);
+            } else {
+                // VR/Curved mode: Standard 3D VR player
+                this.stereoVideoPlayer.load(location.stereoVideo, true, location.projection || 'curved', location.format || 'stereo');
+
+                // Enable stereo mode if in Cardboard mode
+                if (this.isCardboardMode) {
+                    this.stereoVideoPlayer.setStereoMode(true);
+                }
+            }
 
             // Disable camera controls for focused video viewing
+            // ENABLED FOR DESKTOP TESTING
             if (this.controls) {
-                this.controls.enabled = false;
+                this.controls.enabled = true;
             }
 
             // Enable stereo mode if in Cardboard mode
@@ -419,10 +507,13 @@ class App {
 
         this.isCardboardMode = true;
 
-        this.isCardboardMode = true;
-
         // Let components know we are in a VR-like mode
         if (this.panoramaViewer) this.panoramaViewer.setVRMode(true);
+        // Ensure video player switches to stereo layers ONLY if we are actually rendering stereo
+        // (i.e. we have a stereoEffect active). On Desktop, keep it False (Mono) so it's visible.
+        if (this.stereoVideoPlayer) {
+            this.stereoVideoPlayer.setStereoMode(!!this.stereoEffect);
+        }
 
         // Show 2D UI Overlay
         if (this.cardboardUI) this.cardboardUI.show();
@@ -439,7 +530,7 @@ class App {
         // Force exit fullscreen (handle all vendor prefixes)
         try {
             if (document.exitFullscreen) {
-                document.exitFullscreen();
+                document.exitFullscreen().catch(e => console.log('Fullscreen exit blocked/ignored:', e));
             } else if (document.webkitExitFullscreen) {
                 document.webkitExitFullscreen();
             } else if (document.mozCancelFullScreen) {
@@ -480,6 +571,7 @@ class App {
 
         // Reset VR mode in components
         if (this.panoramaViewer) this.panoramaViewer.setVRMode(false);
+        if (this.stereoVideoPlayer) this.stereoVideoPlayer.setStereoMode(false);
 
         // Hide 2D UI Overlay
         if (this.cardboardUI) this.cardboardUI.hide();

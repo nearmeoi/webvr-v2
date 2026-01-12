@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CanvasUI } from '../utils/CanvasUI.js';
 
 /**
  * StereoVideoPlayer - Displays side-by-side stereo video in VR/Cardboard mode
@@ -6,11 +7,13 @@ import * as THREE from 'three';
  * Provides 3D depth perception but NOT 360° view
  */
 export class StereoVideoPlayer {
-    constructor(scene, camera, renderer, onBack) {
+    constructor(scene, camera, renderer, onBack, onEnterVR, onExitVR) {
         this.scene = scene;
         this.camera = camera;
         this.renderer = renderer;
         this.onBack = onBack;
+        this.onEnterVR = onEnterVR;
+        this.onExitVR = onExitVR;
 
         this.group = new THREE.Group();
         this.group.position.set(0, 1.6, 0); // Eye level
@@ -54,83 +57,51 @@ export class StereoVideoPlayer {
         Object.assign(this.fullscreenVideo.style, {
             width: '100%',
             height: '100%',
-            objectFit: 'contain'
+            objectFit: 'contain',
+            pointerEvents: 'none' // Click-through to overlay for gesture detection
         });
         this.fullscreenVideo.playsInline = true;
         this.fullscreenVideo.loop = true;
         this.fullscreenVideo.muted = false;
         this.fullscreenVideo.volume = 0.5;
 
-        // Control bar
-        this.controlBar = document.createElement('div');
-        Object.assign(this.controlBar.style, {
-            position: 'absolute',
-            bottom: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            gap: '15px',
-            padding: '15px 25px',
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            borderRadius: '30px',
-            backdropFilter: 'blur(10px)'
-        });
-
-        // Back button
-        this.htmlBackBtn = document.createElement('button');
-        this.htmlBackBtn.textContent = '← BACK';
-        Object.assign(this.htmlBackBtn.style, {
-            padding: '12px 24px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            color: 'white',
-            backgroundColor: 'rgba(200, 50, 50, 0.6)',
-            border: '2px solid rgba(255, 100, 100, 0.8)',
-            borderRadius: '20px',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-        });
-        this.htmlBackBtn.onmouseenter = () => {
-            this.htmlBackBtn.style.transform = 'scale(1.1)';
-            this.htmlBackBtn.style.backgroundColor = 'rgba(200, 50, 50, 0.8)';
-        };
-        this.htmlBackBtn.onmouseleave = () => {
-            this.htmlBackBtn.style.transform = 'scale(1)';
-            this.htmlBackBtn.style.backgroundColor = 'rgba(200, 50, 50, 0.6)';
-        };
-        this.htmlBackBtn.onclick = () => {
-            this.hideFullscreen();
-            this.stop();
-            if (this.onBack) this.onBack();
-        };
-
-        // Play/Pause button
-        this.htmlPlayBtn = document.createElement('button');
-        this.htmlPlayBtn.textContent = '▶ PLAY';
-        Object.assign(this.htmlPlayBtn.style, {
-            padding: '12px 24px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            color: 'white',
-            backgroundColor: 'rgba(50, 150, 50, 0.6)',
-            border: '2px solid rgba(100, 255, 100, 0.8)',
-            borderRadius: '20px',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-        });
-        this.htmlPlayBtn.onmouseenter = () => {
-            this.htmlPlayBtn.style.transform = 'scale(1.1)';
-        };
-        this.htmlPlayBtn.onmouseleave = () => {
-            this.htmlPlayBtn.style.transform = 'scale(1)';
-        };
-        this.htmlPlayBtn.onclick = () => this.togglePlay();
-
-        this.controlBar.appendChild(this.htmlBackBtn);
-        this.controlBar.appendChild(this.htmlPlayBtn);
         this.videoOverlay.appendChild(this.fullscreenVideo);
-        this.videoOverlay.appendChild(this.controlBar);
         document.body.appendChild(this.videoOverlay);
+
+        // --- Gesture Logic ---
+        // 1 Tap: Pause/Play
+        // 2 Taps: Back
+
+        this.lastClickTime = 0;
+        this.clickTimeout = null;
+
+        this.videoOverlay.addEventListener('click', (e) => {
+            const currentTime = Date.now();
+            const timeDiff = currentTime - this.lastClickTime;
+
+            if (timeDiff < 300 && timeDiff > 0) {
+                // DOUBLE TAP -> BACK
+                console.log('Double Tap Detected: BACK');
+                if (this.clickTimeout) clearTimeout(this.clickTimeout);
+                this.hideFullscreen();
+                this.stop();
+                if (this.onBack) this.onBack();
+                this.lastClickTime = 0;
+            } else {
+                // SINGLE TAP -> START TIMER
+                this.lastClickTime = currentTime;
+
+                // Clear any existing timeout just in case
+                if (this.clickTimeout) clearTimeout(this.clickTimeout);
+
+                this.clickTimeout = setTimeout(() => {
+                    // If no second tap occurred, trigger Play/Pause
+                    console.log('Single Tap Detected: TOGGLE PLAY');
+                    this.togglePlay();
+                    this.lastClickTime = 0;
+                }, 300);
+            }
+        });
     }
 
     showFullscreen() {
@@ -142,67 +113,104 @@ export class StereoVideoPlayer {
     }
 
     createVideoPlanes() {
-        // Video aspect ratio (assuming 16:9 per eye, so full video is 32:9)
-        const planeWidth = 4;
-        const planeHeight = 2.25; // 16:9 aspect
-        const distance = 3; // Distance from viewer
+        // --- 1. Curved Screen (IMAX/Orbital style) ---
+        const radius = 3.5;
+        const height = 2.5;
+        const segments = 32;
+        const thetaLength = Math.PI / 2.5; // ~72 degrees
 
-        // Mono plane (for non-cardboard viewing - shows full side-by-side)
-        const monoGeometry = new THREE.PlaneGeometry(planeWidth * 1.5, planeHeight * 1.5);
-        const monoMaterial = new THREE.MeshBasicMaterial({
-            color: 0x000000,
-            side: THREE.FrontSide
-        });
-        this.monoPlane = new THREE.Mesh(monoGeometry, monoMaterial);
-        this.monoPlane.position.set(0, 0, -distance);
-        this.monoPlane.visible = false; // Hidden - using HTML overlay instead
-        this.group.add(this.monoPlane);
-
-        // Stereo planes - using UV mapping to show correct half of video to each eye
-        // Left eye plane
-        const leftGeometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
-        // Modify UVs to show only left half of video (0.0 to 0.5 on X)
-        const leftUvs = leftGeometry.attributes.uv;
-        for (let i = 0; i < leftUvs.count; i++) {
-            leftUvs.setX(i, leftUvs.getX(i) * 0.5); // Scale X from [0,1] to [0,0.5]
+        // Curved - Mono (Left Eye)
+        const monoGeoCurved = new THREE.CylinderGeometry(radius, radius, height, segments, 1, true, -thetaLength / 2, thetaLength);
+        monoGeoCurved.scale(-1, 1, 1);
+        const monoUvsCurved = monoGeoCurved.attributes.uv;
+        for (let i = 0; i < monoUvsCurved.count; i++) {
+            monoUvsCurved.setX(i, monoUvsCurved.getX(i) * 0.5);
         }
+        this.monoPlaneCurved = new THREE.Mesh(monoGeoCurved, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+        this.monoPlaneCurved.rotation.y = Math.PI;
+        this.monoPlaneCurved.visible = false;
+        this.group.add(this.monoPlaneCurved);
 
-        const leftMaterial = new THREE.MeshBasicMaterial({
-            color: 0x000000,
-            side: THREE.FrontSide
-        });
-        this.leftPlane = new THREE.Mesh(leftGeometry, leftMaterial);
-        this.leftPlane.position.set(0, 0, -distance);
-        this.leftPlane.layers.set(1); // Left eye only
-        this.leftPlane.visible = false;
-        this.group.add(this.leftPlane);
-
-        // Right eye plane
-        const rightGeometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
-        // Modify UVs to show only right half of video (0.5 to 1.0 on X)
-        const rightUvs = rightGeometry.attributes.uv;
-        for (let i = 0; i < rightUvs.count; i++) {
-            rightUvs.setX(i, 0.5 + rightUvs.getX(i) * 0.5); // Scale X from [0,1] to [0.5,1.0]
+        // Curved - Left
+        const leftGeoCurved = new THREE.CylinderGeometry(radius, radius, height, segments, 1, true, -thetaLength / 2, thetaLength);
+        leftGeoCurved.scale(-1, 1, 1);
+        const leftUvsCurved = leftGeoCurved.attributes.uv;
+        for (let i = 0; i < leftUvsCurved.count; i++) {
+            leftUvsCurved.setX(i, leftUvsCurved.getX(i) * 0.5);
         }
+        this.leftPlaneCurved = new THREE.Mesh(leftGeoCurved, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+        this.leftPlaneCurved.rotation.y = Math.PI;
+        this.leftPlaneCurved.layers.set(1);
+        this.leftPlaneCurved.visible = false;
+        this.group.add(this.leftPlaneCurved);
 
-        const rightMaterial = new THREE.MeshBasicMaterial({
-            color: 0x000000,
-            side: THREE.FrontSide
-        });
-        this.rightPlane = new THREE.Mesh(rightGeometry, rightMaterial);
-        this.rightPlane.position.set(0, 0, -distance);
-        this.rightPlane.layers.set(2); // Right eye only
-        this.rightPlane.visible = false;
-        this.group.add(this.rightPlane);
+        // Curved - Right
+        const rightGeoCurved = new THREE.CylinderGeometry(radius, radius, height, segments, 1, true, -thetaLength / 2, thetaLength);
+        rightGeoCurved.scale(-1, 1, 1);
+        const rightUvsCurved = rightGeoCurved.attributes.uv;
+        for (let i = 0; i < rightUvsCurved.count; i++) {
+            rightUvsCurved.setX(i, 0.5 + rightUvsCurved.getX(i) * 0.5);
+        }
+        this.rightPlaneCurved = new THREE.Mesh(rightGeoCurved, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+        this.rightPlaneCurved.rotation.y = Math.PI;
+        this.rightPlaneCurved.layers.set(2);
+        this.rightPlaneCurved.visible = false;
+        this.group.add(this.rightPlaneCurved);
 
-        // Background (dark sphere for immersion)
-        const bgGeometry = new THREE.SphereGeometry(50, 32, 32);
+
+        // --- 2. Flat Screen (Standard) ---
+        const planeWidth = 5; // Slightly larger flatscreen
+        const planeHeight = 2.8;
+        const distance = 4; // Further away
+
+        // Flat - Mono (Left Eye)
+        const monoGeoFlat = new THREE.PlaneGeometry(planeWidth, planeHeight);
+        const monoUvsFlat = monoGeoFlat.attributes.uv;
+        for (let i = 0; i < monoUvsFlat.count; i++) {
+            monoUvsFlat.setX(i, monoUvsFlat.getX(i) * 0.5);
+        }
+        this.monoPlaneFlat = new THREE.Mesh(monoGeoFlat, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+        this.monoPlaneFlat.position.set(0, 0, -distance);
+        this.monoPlaneFlat.visible = false;
+        this.group.add(this.monoPlaneFlat);
+
+        // Flat - Left
+        const leftGeoFlat = new THREE.PlaneGeometry(planeWidth, planeHeight);
+        const leftUvsFlat = leftGeoFlat.attributes.uv;
+        for (let i = 0; i < leftUvsFlat.count; i++) {
+            leftUvsFlat.setX(i, leftUvsFlat.getX(i) * 0.5);
+        }
+        this.leftPlaneFlat = new THREE.Mesh(leftGeoFlat, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+        this.leftPlaneFlat.position.set(0, 0, -distance);
+        this.leftPlaneFlat.layers.set(1);
+        this.leftPlaneFlat.visible = false;
+        this.group.add(this.leftPlaneFlat);
+
+        // Flat - Right
+        const rightGeoFlat = new THREE.PlaneGeometry(planeWidth, planeHeight);
+        const rightUvsFlat = rightGeoFlat.attributes.uv;
+        for (let i = 0; i < rightUvsFlat.count; i++) {
+            rightUvsFlat.setX(i, 0.5 + rightUvsFlat.getX(i) * 0.5);
+        }
+        this.rightPlaneFlat = new THREE.Mesh(rightGeoFlat, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+        this.rightPlaneFlat.position.set(0, 0, -distance);
+        this.rightPlaneFlat.layers.set(2);
+        this.rightPlaneFlat.visible = false;
+        this.group.add(this.rightPlaneFlat);
+
+        // Background (Black Sphere)
+        const bgGeometry = new THREE.SphereGeometry(20, 32, 32);
         bgGeometry.scale(-1, 1, 1);
-        const bgMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const bgMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            side: THREE.BackSide
+        });
         this.background = new THREE.Mesh(bgGeometry, bgMaterial);
-        this.background.visible = false; // Hidden - using HTML overlay
+        this.background.visible = true;
+        this.background.renderOrder = -1;
         this.group.add(this.background);
     }
+
 
     createControls() {
         // Control dock
@@ -218,40 +226,12 @@ export class StereoVideoPlayer {
 
     createBackButton() {
         const geometry = new THREE.PlaneGeometry(0.4, 0.18);
-        const canvas = document.createElement('canvas');
-        canvas.width = 400;
-        canvas.height = 180;
-        const ctx = canvas.getContext('2d');
-
-        const roundRect = (x, y, w, h, r) => {
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
-            ctx.closePath();
-        };
-
-        ctx.clearRect(0, 0, 400, 180);
-        roundRect(10, 10, 380, 160, 40);
-        ctx.fillStyle = 'rgba(200, 50, 50, 0.4)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 100, 100, 0.8)';
-        ctx.lineWidth = 8;
-        ctx.stroke();
-
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 40px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 5;
-        ctx.fillText('BACK', 200, 90);
+        const canvas = CanvasUI.createButtonTexture('BACK', {
+            width: 400,
+            height: 180,
+            radius: 40,
+            fontSize: 40
+        });
 
         const texture = new THREE.CanvasTexture(canvas);
         const material = new THREE.MeshBasicMaterial({
@@ -261,8 +241,8 @@ export class StereoVideoPlayer {
         });
 
         this.backBtn = new THREE.Mesh(geometry, material);
-        this.backBtn.position.set(-0.3, -1.0, -1.6);
-        this.backBtn.lookAt(-0.3, 0.6, 0);
+        this.backBtn.position.set(-0.4, -0.8, -2.5);
+        this.backBtn.lookAt(-0.4, 0.6, 0);
 
         this.backBtn.userData.isInteractable = true;
         this.backBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
@@ -279,12 +259,9 @@ export class StereoVideoPlayer {
     }
 
     createPlayButton() {
-        this.playBtnCanvas = document.createElement('canvas');
-        this.playBtnCanvas.width = 200;
-        this.playBtnCanvas.height = 200;
-        this.updatePlayButton(false);
-
+        this.playBtnCanvas = CanvasUI.createPlayButtonTexture(false);
         const texture = new THREE.CanvasTexture(this.playBtnCanvas);
+
         const geometry = new THREE.PlaneGeometry(0.18, 0.18);
         const material = new THREE.MeshBasicMaterial({
             map: texture,
@@ -293,8 +270,8 @@ export class StereoVideoPlayer {
         });
 
         this.playBtn = new THREE.Mesh(geometry, material);
-        this.playBtn.position.set(0.3, -1.0, -1.6);
-        this.playBtn.lookAt(0.3, 0.6, 0);
+        this.playBtn.position.set(0.4, -0.8, -2.5);
+        this.playBtn.lookAt(0.4, 0.6, 0);
 
         this.playBtn.userData.isInteractable = true;
         this.playBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
@@ -308,33 +285,12 @@ export class StereoVideoPlayer {
     }
 
     updatePlayButton(isPlaying) {
-        const ctx = this.playBtnCanvas.getContext('2d');
-        ctx.clearRect(0, 0, 200, 200);
+        // Redraw to existing canvas or create new one if needed (but we usually just redraw)
+        // Since CanvasUI.createPlayButtonTexture creates a NEW canvas, we might want a 'draw' method instead.
+        // I added drawPlayButton to CanvasUI for this purpose!
+        CanvasUI.drawPlayButton(this.playBtnCanvas, isPlaying);
 
-        ctx.beginPath();
-        ctx.arc(100, 100, 90, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(50, 150, 50, 0.6)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(100, 255, 100, 0.8)';
-        ctx.lineWidth = 5;
-        ctx.stroke();
-
-        ctx.fillStyle = 'white';
-        if (isPlaying) {
-            // Pause icon
-            ctx.fillRect(70, 60, 20, 80);
-            ctx.fillRect(110, 60, 20, 80);
-        } else {
-            // Play icon
-            ctx.beginPath();
-            ctx.moveTo(75, 55);
-            ctx.lineTo(75, 145);
-            ctx.lineTo(145, 100);
-            ctx.closePath();
-            ctx.fill();
-        }
-
-        if (this.playBtn) {
+        if (this.playBtn && this.playBtn.material.map) {
             this.playBtn.material.map.needsUpdate = true;
         }
     }
@@ -343,75 +299,189 @@ export class StereoVideoPlayer {
         this.loadingGroup = new THREE.Group();
         this.loadingGroup.visible = false;
 
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 256;
-        this.loadingCanvas = canvas;
-        this.loadingCtx = canvas.getContext('2d');
-
-        const texture = new THREE.CanvasTexture(canvas);
-        const geometry = new THREE.PlaneGeometry(0.5, 0.5);
-        const material = new THREE.MeshBasicMaterial({
-            map: texture,
+        // 1. Static Spinner Mesh (Rotates)
+        const spinnerCanvas = CanvasUI.createLoadingTexture();
+        const spinnerTexture = new THREE.CanvasTexture(spinnerCanvas);
+        const spinnerGeom = new THREE.PlaneGeometry(0.5, 0.5);
+        const spinnerMat = new THREE.MeshBasicMaterial({
+            map: spinnerTexture,
             transparent: true,
             depthTest: false
         });
 
-        this.loadingSpinner = new THREE.Mesh(geometry, material);
+        this.loadingSpinner = new THREE.Mesh(spinnerGeom, spinnerMat);
         this.loadingSpinner.position.set(0, 0, -2);
         this.loadingGroup.add(this.loadingSpinner);
+
+        // 2. Static Text Mesh (Fixed)
+        // Reuse createLoadingTextTexture from CanvasUI? I added it!
+        const textCanvas = CanvasUI.createLoadingTextTexture();
+        this.loadingCtx = textCanvas.getContext('2d'); // Keep context if needed, but here it's static "Loading..." 
+        // Wait, StereoVideoPlayer changes text to "Loading Video..."!
+        // So let's just clear and write "Loading Video..." here manually or add a param to CanvasUI later.
+        // For now, manual is fine for custom text.
+
+        const customTextCanvas = document.createElement('canvas');
+        customTextCanvas.width = 256;
+        customTextCanvas.height = 64;
+        const ctx = customTextCanvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Loading Video...', 128, 32);
+
+        const textTexture = new THREE.CanvasTexture(customTextCanvas);
+        const textGeom = new THREE.PlaneGeometry(0.5, 0.125);
+        const textMat = new THREE.MeshBasicMaterial({
+            map: textTexture,
+            transparent: true,
+            depthTest: false
+        });
+
+        this.loadingText = new THREE.Mesh(textGeom, textMat);
+        this.loadingText.position.set(0, -0.4, -2);
+        this.loadingGroup.add(this.loadingText);
+
         this.group.add(this.loadingGroup);
-        this.loadingRotation = 0;
     }
 
     updateLoadingSpinner() {
         if (!this.loadingGroup.visible) return;
 
-        const ctx = this.loadingCtx;
-        ctx.clearRect(0, 0, 256, 256);
-
-        this.loadingRotation += 0.1;
-        ctx.save();
-        ctx.translate(128, 100);
-        ctx.rotate(this.loadingRotation);
-
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 8;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.arc(0, 0, 40, 0, Math.PI * 1.5);
-        ctx.stroke();
-        ctx.restore();
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('Loading Video...', 128, 180);
-
-        this.loadingSpinner.material.map.needsUpdate = true;
+        // GPU Rotation
+        if (this.loadingSpinner) {
+            this.loadingSpinner.rotation.z -= 0.1;
+        }
     }
 
-    load(videoPath, autoPlay = true) {
-        // Show fullscreen overlay for desktop viewing
-        this.showFullscreen();
-
-        // Set video source and load
+    load(videoPath, autoPlay = true, projection = 'curved', format = 'stereo') {
+        // Set video source
         this.fullscreenVideo.src = videoPath;
         this.fullscreenVideo.load();
 
+        // Ensure texture is created for the new video
+        this.createVideoTexture();
+
+        this.projection = projection;
+        this.format = format;
+
+        // Do NOT force Enter VR (User requested manual entry)
+        // if (this.onEnterVR) this.onEnterVR();
+
+        this.hideFullscreen();
+        this.group.visible = true;
+        this.updateVisibility(this.isStereoMode); // Respect current VR state (Mono for desktop default)
+
+        if (this.projection === 'flat') {
+            // --- FLAT MODE (Clean Cinema) ---
+            // Hide Pointer mechanism (simulated by hiding controls or disabling gaze)
+            this.toggleInteractiveButtons(false);
+            this.gestureEnabled = true;
+        } else {
+            // --- ORBITAL/CURVED MODE (VR) ---
+            this.toggleInteractiveButtons(true);
+            this.gestureEnabled = false;
+        }
+
         this.fullscreenVideo.onloadeddata = () => {
+            console.log('Video loaded successfully:', this.fullscreenVideo.videoWidth, 'x', this.fullscreenVideo.videoHeight);
             if (autoPlay) {
+                console.log('Attempting autoplay...');
                 this.play();
             }
         };
 
         this.fullscreenVideo.onerror = (e) => {
             console.error('Video load error:', e);
+            console.error('Video Error Code:', this.fullscreenVideo.error ? this.fullscreenVideo.error.code : 'unknown');
+            console.error('Video Src:', this.fullscreenVideo.src);
         };
 
-        // Keep group hidden for desktop (using HTML overlay)
+        // Reset gesture tracking
+        this.lastQuaternion = new THREE.Quaternion();
+        this.gestureCooldown = 3.0; // 3 second cooldown to prevent immediate exit on load
+    }
+
+    play2D(videoPath) {
+        // Pure 2D mode - just show the HTML video overlay
+        this.fullscreenVideo.src = videoPath;
+        this.fullscreenVideo.load();
+
+        // Hide 3D elements
         this.group.visible = false;
+
+        // Show HTML overlay
+        this.showFullscreen();
+
+        // Hide 2D UI Overlay (CardboardUI) if active, just in case
+        // (Handled by main.js usually, but good to ensure)
+
+        this.fullscreenVideo.onloadeddata = () => {
+            console.log('2D Video loaded:', this.fullscreenVideo.videoWidth, 'x', this.fullscreenVideo.videoHeight);
+            this.play();
+        };
+
+        this.fullscreenVideo.onerror = (e) => {
+            console.error('2D Video load error:', e);
+        };
+    }
+
+    hide() {
+        this.stop();
+        this.group.visible = false;
+        this.hideFullscreen();
+    }
+
+    updateVisibility(isStereo) {
+        // Hide all first
+        this.monoPlaneCurved.visible = false;
+        this.leftPlaneCurved.visible = false;
+        this.rightPlaneCurved.visible = false;
+        this.monoPlaneFlat.visible = false;
+        this.leftPlaneFlat.visible = false;
+        this.rightPlaneFlat.visible = false;
+
+        const isCurved = this.projection === 'curved';
+
+        if (isStereo) {
+            // Stereo Mode
+            if (this.format === 'mono') {
+                // Mono Source in VR: Use Mono Plane (Full Res) for both eyes
+                // We must enable layers 1 & 2 on the mono plane so both eyes see it
+                if (isCurved) {
+                    this.monoPlaneCurved.visible = true;
+                    this.monoPlaneCurved.layers.enable(1); // Left Eye
+                    this.monoPlaneCurved.layers.enable(2); // Right Eye
+                } else {
+                    this.monoPlaneFlat.visible = true;
+                    this.monoPlaneFlat.layers.enable(1);
+                    this.monoPlaneFlat.layers.enable(2);
+                }
+            } else {
+                // Stereo Source (Top/Bottom or Side-by-Side): Use separate planes
+                if (isCurved) {
+                    this.leftPlaneCurved.visible = true;
+                    this.rightPlaneCurved.visible = true;
+                } else {
+                    this.leftPlaneFlat.visible = true;
+                    this.rightPlaneFlat.visible = true;
+                }
+            }
+        } else {
+            // Mono Mode (Desktop) - Standard Layer 0
+            if (isCurved) {
+                this.monoPlaneCurved.visible = true;
+                // Ensure layer 0 is enabled (default)
+            } else {
+                this.monoPlaneFlat.visible = true;
+            }
+        }
+    }
+
+    setStereoMode(enabled) {
+        this.isStereoMode = enabled;
+        this.updateVisibility(enabled);
     }
 
     createVideoTexture() {
@@ -419,55 +489,23 @@ export class StereoVideoPlayer {
             this.videoTexture.dispose();
         }
 
-        this.videoTexture = new THREE.VideoTexture(this.video);
+        this.videoTexture = new THREE.VideoTexture(this.fullscreenVideo);  // Use fullscreenVideo element
         this.videoTexture.minFilter = THREE.LinearFilter;
         this.videoTexture.magFilter = THREE.LinearFilter;
         this.videoTexture.colorSpace = THREE.SRGBColorSpace;
+        this.videoTexture.generateMipmaps = false;
 
         // Apply texture to all planes
-        this.monoPlane.material.map = this.videoTexture;
-        this.monoPlane.material.color.set(0xffffff);
-        this.monoPlane.material.needsUpdate = true;
+        const mats = [
+            this.monoPlaneCurved.material, this.leftPlaneCurved.material, this.rightPlaneCurved.material,
+            this.monoPlaneFlat.material, this.leftPlaneFlat.material, this.rightPlaneFlat.material
+        ];
 
-        this.leftPlane.material.map = this.videoTexture;
-        this.leftPlane.material.color.set(0xffffff);
-        this.leftPlane.material.needsUpdate = true;
-
-        this.rightPlane.material.map = this.videoTexture;
-        this.rightPlane.material.color.set(0xffffff);
-        this.rightPlane.material.needsUpdate = true;
-    }
-
-    play() {
-        if (!this.fullscreenVideo) return;
-        this.fullscreenVideo.play().then(() => {
-            this.isPlaying = true;
-            this.updatePlayButton(true);
-            this.htmlPlayBtn.textContent = '⏸ PAUSE';
-        }).catch(e => {
-            console.log('Video autoplay blocked:', e);
-            this.isPlaying = false;
-            this.updatePlayButton(false);
-            this.htmlPlayBtn.textContent = '▶ PLAY';
+        mats.forEach(mat => {
+            mat.map = this.videoTexture;
+            mat.color.set(0xffffff);
+            mat.needsUpdate = true;
         });
-    }
-
-    pause() {
-        if (!this.fullscreenVideo) return;
-        this.fullscreenVideo.pause();
-        this.isPlaying = false;
-        this.updatePlayButton(false);
-        this.htmlPlayBtn.textContent = '▶ PLAY';
-    }
-
-    stop() {
-        if (this.fullscreenVideo) {
-            this.fullscreenVideo.pause();
-            this.fullscreenVideo.currentTime = 0;
-        }
-        this.isPlaying = false;
-        this.updatePlayButton(false);
-        if (this.htmlPlayBtn) this.htmlPlayBtn.textContent = '▶ PLAY';
     }
 
     togglePlay() {
@@ -478,33 +516,113 @@ export class StereoVideoPlayer {
         }
     }
 
-    setStereoMode(enabled) {
-        this.isStereoMode = enabled;
-        this.monoPlane.visible = !enabled;
-        this.leftPlane.visible = enabled;
-        this.rightPlane.visible = enabled;
+    play() {
+        if (!this.fullscreenVideo) return;
+        this.fullscreenVideo.play().then(() => {
+            this.isPlaying = true;
+            this.updatePlayButton(true);
+            if (this.htmlPlayBtn) this.htmlPlayBtn.innerHTML = '⏸ &nbsp; PAUSE';
+        }).catch(e => {
+            console.log('Video autoplay blocked:', e);
+            this.isPlaying = false;
+            this.updatePlayButton(false);
+            if (this.htmlPlayBtn) this.htmlPlayBtn.innerHTML = '▶ &nbsp; PLAY';
+        });
     }
 
-    showLoading() {
-        if (this.loadingGroup) {
-            this.loadingGroup.visible = true;
+    pause() {
+        if (!this.fullscreenVideo) return;
+        this.fullscreenVideo.pause();
+        this.isPlaying = false;
+        this.updatePlayButton(false);
+        if (this.htmlPlayBtn) this.htmlPlayBtn.innerHTML = '▶ &nbsp; PLAY';
+    }
+
+    stop() {
+        if (this.fullscreenVideo) {
+            this.fullscreenVideo.pause();
+            this.fullscreenVideo.currentTime = 0;
         }
-    }
+        this.isPlaying = false;
+        this.updatePlayButton(false);
+        this.updatePlayButton(false);
+        if (this.htmlPlayBtn) this.htmlPlayBtn.innerHTML = '▶ &nbsp; PLAY';
 
-    hideLoading() {
-        if (this.loadingGroup) {
-            this.loadingGroup.visible = false;
+        // Force exit VR when stopped/back
+        if (this.onExitVR) {
+            this.onExitVR();
         }
-    }
 
-    show() {
-        this.showFullscreen();
-    }
-
-    hide() {
-        this.stop();
+        // Always hide HTML overlay on stop
         this.hideFullscreen();
-        this.group.visible = false;
+
+        this.gestureEnabled = false;
+    }
+
+    toggleInteractiveButtons(visible) {
+        if (this.controlDock) {
+            this.controlDock.visible = visible;
+        }
+    }
+
+    updateGestures(delta) {
+        if (!this.gestureEnabled || !this.camera) return;
+
+        if (this.gestureCooldown > 0) {
+            this.gestureCooldown -= delta;
+            this.lastQuaternion.copy(this.camera.quaternion);
+            return;
+        }
+
+        // Current rotation
+        const currentQ = this.camera.quaternion;
+
+        // Calculate angular difference
+        // We focus on Y-axis rotation (Yaw) for "Flick Left/Right"
+        // But quaternion diff angle is general.
+        // Let's use Euler for simpler "Directional" velocity check
+        const currentEuler = new THREE.Euler().setFromQuaternion(currentQ, 'YXZ');
+
+        if (!this.lastEuler) {
+            this.lastEuler = currentEuler.clone();
+            this.lastQuaternion.copy(currentQ);
+            return;
+        }
+
+        // Calculate Yaw Velocity (rad/s)
+        let yawDiff = currentEuler.y - this.lastEuler.y;
+
+        // Handle wrap-around (PI to -PI)
+        if (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+        if (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+
+        const yawVelocity = yawDiff / delta;
+
+        // Thresholds
+        const flickThreshold = 1.5; // rad/s (Approx 90 deg/s)
+
+        // "Flick Left" means turning head LEFT (Positive Rotation if Y is Up? confirm coords)
+        // Three.js: +Y is Up. Rotating Left usually increases Y (Right Hand Rule).
+        // Let's test Magnitude first.
+
+        if (Math.abs(yawVelocity) > flickThreshold) {
+            console.log("Gesture Detected: High Velocity", yawVelocity);
+
+            // Check direction: Turning Left vs Right
+            // User asked "Flick ke kiri untuk back" (Flick to left for back)
+            // Usually flipping pages left-to-right means dragging left? 
+            // Turning head left = Rotation +Y.
+
+            if (yawVelocity > flickThreshold) {
+                console.log("Flick Left Detected -> BACK");
+                this.stop();
+                if (this.onBack) this.onBack();
+                this.gestureCooldown = 1.0; // 1 second cooldown
+            }
+        }
+
+        this.lastEuler.copy(currentEuler);
+        this.lastQuaternion.copy(currentQ);
     }
 
     update(delta) {
@@ -533,11 +651,13 @@ export class StereoVideoPlayer {
             }
         };
 
-        animateObject(this.backBtn);
-        animateObject(this.playBtn);
+        if (this.controlDock && this.controlDock.visible) {
+            animateObject(this.backBtn);
+            animateObject(this.playBtn);
+        }
 
-        // NOTE: Controls stay fixed in place for focused video viewing
-        // No camera-following rotation
+        // Gesture Update
+        this.updateGestures(delta);
     }
 
     dispose() {

@@ -25,13 +25,15 @@ export class CardboardUI {
             fontFamily: 'sans-serif'
         });
 
-        // 1. Back Button (Top Left)
+        // 1. Back Button (Top Left) - REMOVED per user request
+        /*
         const backBtn = document.createElement('div');
         backBtn.innerHTML = '&#8592;'; // Left Arrow
         Object.assign(backBtn.style, {
             position: 'absolute',
             top: '20px',
-            left: '20px',
+            right: '20px', // Moved to Top Right
+            left: 'auto',
             color: 'white',
             fontSize: '40px',
             fontWeight: 'bold',
@@ -50,8 +52,10 @@ export class CardboardUI {
             if (this.onExit) this.onExit();
         });
         this.container.appendChild(backBtn);
+        */
 
-        // 2. Gear Icon (Bottom Center)
+        // 2. Gear Icon (Bottom Center) - REMOVED per user request
+        /*
         const gearBtn = document.createElement('div');
         gearBtn.innerHTML = '&#9881;'; // Gear symbol
         Object.assign(gearBtn.style, {
@@ -76,8 +80,10 @@ export class CardboardUI {
             if (this.onSettings) this.onSettings();
         });
         this.container.appendChild(gearBtn);
+        */
 
-        // 3. Center Divider Line
+        // 3. Center Divider Line - REMOVED per user request
+        /*
         const divider = document.createElement('div');
         Object.assign(divider.style, {
             position: 'absolute',
@@ -89,6 +95,7 @@ export class CardboardUI {
             transform: 'translate(-50%, -50%)'
         });
         this.container.appendChild(divider);
+        */
 
         document.body.appendChild(this.container);
     }

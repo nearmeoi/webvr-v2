@@ -12,29 +12,27 @@ export const LOCATIONS = [
     },
     {
         id: 1,
-        name: 'Losari Beach',
+        name: 'Losari (Orbital)',
         thumbnail: '/Virtual Tour Development/Losari Beach/Thumbnail Losari.jpg',
         panorama: null,
         audio: '/Virtual Tour Development/Losari Beach/Pantai Losari - Made with Clipchamp.m4a',
         // Side-by-side stereo video for VR (replaces 360 photo experience)
-        stereoVideo: '/Virtual Tour Development/Losari Beach/VT Panlos.mp4',
+        stereoVideo: '/Virtual Tour Development/Losari Beach/panllos 1 layar.mp4',
+        projection: 'curved',
+        format: 'mono', // Source is 1 Screen (Mono)
         subLocations: null,
-        scenes: [
-            {
-                id: '1',
-                path: '/Virtual Tour Development/Losari Beach/1.jpg',
-                links: [
-                    { target: '3', label: 'Kanan', angle: 90 }  // Right
-                ]
-            },
-            {
-                id: '3',
-                path: '/Virtual Tour Development/Losari Beach/3-kanan.jpg',
-                links: [
-                    { target: '1', label: 'Kembali', angle: 270 } // Back to center (Left relative to here)
-                ]
-            }
-        ]
+        scenes: []
+    },
+    {
+        id: 4, // New ID
+        name: 'Losari (Flat)',
+        thumbnail: '/Virtual Tour Development/Losari Beach/Thumbnail Losari.jpg',
+        panorama: null,
+        audio: '/Virtual Tour Development/Losari Beach/Pantai Losari - Made with Clipchamp.m4a',
+        stereoVideo: '/Virtual Tour Development/Losari Beach/VT Panlos.mp4',
+        projection: 'flat',
+        subLocations: null,
+        scenes: []
     },
     {
         id: 2,

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LOCATIONS } from './OrbitalMenu.js';
+import { CanvasUI } from '../utils/CanvasUI.js';
 
 export class PanoramaViewer {
     constructor(scene, onBack, camera, renderer) {
@@ -36,6 +37,9 @@ export class PanoramaViewer {
         // Ensure GazeController can hit this
         this.group.userData.isInteractable = false; // Container not interactable
 
+        // Reuse arrow texture for all hotspots to save memory
+        this.arrowTexture = null;
+
         // TEMP DEBUG: Click to get angle (Restored for correction)
         window.addEventListener('click', (event) => {
             if (!this.group.visible) return;
@@ -67,44 +71,13 @@ export class PanoramaViewer {
     }
 
     createBackButton() {
-        const geometry = new THREE.PlaneGeometry(0.4, 0.18); // Wide but same height as audio
-
-        const canvas = document.createElement('canvas');
-        canvas.width = 400;
-        canvas.height = 180; // Matching aspect ratio roughly
-        const ctx = canvas.getContext('2d');
-
-        // Helper
-        const roundRect = (x, y, w, h, r) => {
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
-            ctx.closePath();
-        }
-
-        // Glass button style
-        ctx.clearRect(0, 0, 400, 180);
-        roundRect(10, 10, 380, 160, 40); // Rounded pill
-        ctx.fillStyle = 'rgba(200, 50, 50, 0.4)'; // Red-ish glass
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 100, 100, 0.8)';
-        ctx.lineWidth = 8;
-        ctx.stroke();
-
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 40px sans-serif'; // Smaller font
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 5;
-        ctx.fillText('BACK', 200, 90);
+        const geometry = new THREE.PlaneGeometry(0.4, 0.18);
+        const canvas = CanvasUI.createButtonTexture('BACK', {
+            width: 400,
+            height: 180,
+            radius: 40,
+            fontSize: 40
+        });
 
         const texture = new THREE.CanvasTexture(canvas);
         const material = new THREE.MeshBasicMaterial({
@@ -117,7 +90,6 @@ export class PanoramaViewer {
         this.backBtn.position.set(0, -1.0, -1.6); // Moved to Z -1.6 to match radius
         this.backBtn.lookAt(0, 0.6, 0);
 
-        // Interaction
         this.backBtn.userData.isInteractable = true;
         this.backBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
         this.backBtn.userData.targetScale = new THREE.Vector3(1, 1, 1);
@@ -133,11 +105,7 @@ export class PanoramaViewer {
 
     createAudioControls() {
         // Play/Pause Button
-        this.playBtnCanvas = document.createElement('canvas');
-        this.playBtnCanvas.width = 200;
-        this.playBtnCanvas.height = 200;
-        this.updatePlayButton(false); // Start with play icon
-
+        this.playBtnCanvas = CanvasUI.createPlayButtonTexture(false);
         const playTexture = new THREE.CanvasTexture(this.playBtnCanvas);
         const playGeometry = new THREE.PlaneGeometry(0.18, 0.18);
         const playMaterial = new THREE.MeshBasicMaterial({
@@ -165,11 +133,7 @@ export class PanoramaViewer {
         this.controlDock.add(this.playBtn);
 
         // Mute Button
-        this.muteBtnCanvas = document.createElement('canvas');
-        this.muteBtnCanvas.width = 200;
-        this.muteBtnCanvas.height = 200;
-        this.updateMuteButton(false); // Start unmuted
-
+        this.muteBtnCanvas = CanvasUI.createMuteButtonTexture(false);
         const muteTexture = new THREE.CanvasTexture(this.muteBtnCanvas);
         const muteGeometry = new THREE.PlaneGeometry(0.18, 0.18);
         const muteMaterial = new THREE.MeshBasicMaterial({
@@ -211,7 +175,6 @@ export class PanoramaViewer {
 
         if (mode === 'with-dock') {
             // Far right to avoid dock thumbnails
-
             // SYNC_NOTE: This height must match the SubMenu dock height!
             // SubMenu dock is at World Y = 0.7.
             // Panorama Group is at World Y = 1.6.
@@ -242,88 +205,16 @@ export class PanoramaViewer {
     }
 
     updatePlayButton(isPlaying) {
-        const ctx = this.playBtnCanvas.getContext('2d');
-        ctx.clearRect(0, 0, 200, 200);
-
-        // Background circle
-        ctx.beginPath();
-        ctx.arc(100, 100, 90, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(50, 150, 50, 0.6)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(100, 255, 100, 0.8)';
-        ctx.lineWidth = 5;
-        ctx.stroke();
-
-        ctx.fillStyle = 'white';
-        if (isPlaying) {
-            // Pause icon (two bars)
-            ctx.fillRect(70, 60, 20, 80);
-            ctx.fillRect(110, 60, 20, 80);
-        } else {
-            // Play icon (triangle)
-            ctx.beginPath();
-            ctx.moveTo(75, 55);
-            ctx.lineTo(75, 145);
-            ctx.lineTo(145, 100);
-            ctx.closePath();
-            ctx.fill();
-        }
-
-        if (this.playBtn) {
+        // Redraw on the existing canvas
+        CanvasUI.drawPlayButton(this.playBtnCanvas, isPlaying);
+        if (this.playBtn && this.playBtn.material.map) {
             this.playBtn.material.map.needsUpdate = true;
         }
     }
 
     updateMuteButton(isMuted) {
-        const ctx = this.muteBtnCanvas.getContext('2d');
-        ctx.clearRect(0, 0, 200, 200);
-
-        // Background circle
-        ctx.beginPath();
-        ctx.arc(100, 100, 90, 0, Math.PI * 2);
-        ctx.fillStyle = isMuted ? 'rgba(150, 50, 50, 0.6)' : 'rgba(50, 100, 150, 0.6)';
-        ctx.fill();
-        ctx.strokeStyle = isMuted ? 'rgba(255, 100, 100, 0.8)' : 'rgba(100, 200, 255, 0.8)';
-        ctx.lineWidth = 5;
-        ctx.stroke();
-
-        ctx.fillStyle = 'white';
-        // Speaker icon
-        ctx.beginPath();
-        ctx.moveTo(60, 80);
-        ctx.lineTo(85, 80);
-        ctx.lineTo(115, 55);
-        ctx.lineTo(115, 145);
-        ctx.lineTo(85, 120);
-        ctx.lineTo(60, 120);
-        ctx.closePath();
-        ctx.fill();
-
-        if (!isMuted) {
-            // Sound waves
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 6;
-            ctx.beginPath();
-            ctx.arc(115, 100, 25, -0.6, 0.6);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(115, 100, 45, -0.6, 0.6);
-            ctx.stroke();
-        } else {
-            // X mark
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 8;
-            ctx.beginPath();
-            ctx.moveTo(130, 70);
-            ctx.lineTo(170, 130);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(170, 70);
-            ctx.lineTo(130, 130);
-            ctx.stroke();
-        }
-
-        if (this.muteBtn) {
+        CanvasUI.drawMuteButton(this.muteBtnCanvas, isMuted);
+        if (this.muteBtn && this.muteBtn.material.map) {
             this.muteBtn.material.map.needsUpdate = true;
         }
     }
@@ -440,14 +331,6 @@ export class PanoramaViewer {
             return;
         }
 
-        // If already loading this specific texture as a main request, just show loading
-        // If it was a background preload, we might want to "promote" it or just wait.
-        // For simplicity, we'll just wait for the existing promise/callback if we could hooked into it, 
-        // but Three.js TextureLoader doesn't return a promise we can easily attach to for the *same* request object usually.
-        // multi-request handling: if we initiate a standard load, and one is pending, we can't easily jump onto the pending one's callback 
-        // without a custom manager. 
-        // EASIER FIX: just let it load. BUT, let's stop *Preloads* from spamming.
-
         // Show loading indicator
         this.showLoading();
 
@@ -531,25 +414,35 @@ export class PanoramaViewer {
         this.loadingBg = new THREE.Mesh(bgGeometry, bgMaterial);
         this.loadingGroup.add(this.loadingBg);
 
-        // Loading text/spinner canvas
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 256;
-        this.loadingCanvas = canvas;
-        this.loadingCtx = canvas.getContext('2d');
-
-        const texture = new THREE.CanvasTexture(canvas);
-        const planeGeometry = new THREE.PlaneGeometry(0.5, 0.5);
-        const planeMaterial = new THREE.MeshBasicMaterial({
-            map: texture,
+        // 1. Static Spinner Texture (No redraw loop)
+        const spinnerCanvas = CanvasUI.createLoadingTexture();
+        const spinnerTexture = new THREE.CanvasTexture(spinnerCanvas);
+        const spinnerGeom = new THREE.PlaneGeometry(0.5, 0.5);
+        const spinnerMat = new THREE.MeshBasicMaterial({
+            map: spinnerTexture,
             transparent: true,
             depthTest: false
         });
 
-        this.loadingSpinner = new THREE.Mesh(planeGeometry, planeMaterial);
+        this.loadingSpinner = new THREE.Mesh(spinnerGeom, spinnerMat);
         this.loadingSpinner.position.set(0, 0, -2);
         this.loadingSpinner.renderOrder = 1000;
         this.loadingGroup.add(this.loadingSpinner);
+
+        // 2. Static Text Texture (Separate, so it doesn't rotate)
+        const textCanvas = CanvasUI.createLoadingTextTexture();
+        const textTexture = new THREE.CanvasTexture(textCanvas);
+        // Aspect ratio of text canvas 256x64 is 4:1
+        const textGeom = new THREE.PlaneGeometry(0.5, 0.125);
+        const textMat = new THREE.MeshBasicMaterial({
+            map: textTexture,
+            transparent: true,
+            depthTest: false
+        });
+        this.loadingText = new THREE.Mesh(textGeom, textMat);
+        this.loadingText.position.set(0, -0.4, -2); // Below spinner
+        this.loadingText.renderOrder = 1000;
+        this.loadingGroup.add(this.loadingText);
 
         this.group.add(this.loadingGroup);
         this.loadingRotation = 0;
@@ -557,32 +450,10 @@ export class PanoramaViewer {
 
     updateLoadingSpinner() {
         if (!this.loadingGroup.visible) return;
-
-        const ctx = this.loadingCtx;
-        ctx.clearRect(0, 0, 256, 256);
-
-        // Draw spinning circle
-        this.loadingRotation += 0.1;
-        ctx.save();
-        ctx.translate(128, 100);
-        ctx.rotate(this.loadingRotation);
-
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 8;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.arc(0, 0, 40, 0, Math.PI * 1.5);
-        ctx.stroke();
-        ctx.restore();
-
-        // Draw "Loading..." text
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('Loading...', 128, 180);
-
-        this.loadingSpinner.material.map.needsUpdate = true;
+        // Simple rotation on GPU is extremely cheap
+        if (this.loadingSpinner) {
+            this.loadingSpinner.rotation.z -= 0.1;
+        }
     }
 
     showLoading() {
@@ -600,36 +471,43 @@ export class PanoramaViewer {
     }
 
     createArrowTexture() {
+        if (this.arrowTexture) {
+            return this.arrowTexture;
+        }
+
+        // Use standard canvas logic, but done once
         const canvas = document.createElement('canvas');
         canvas.width = 128;
         canvas.height = 128;
         const ctx = canvas.getContext('2d');
 
-        // Outer glow (soft light blue halo)
+        // Outer glow
         ctx.beginPath();
         ctx.arc(64, 64, 50, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(173, 216, 230, 0.2)'; // Light blue, low opacity
+        ctx.fillStyle = 'rgba(173, 216, 230, 0.2)';
         ctx.fill();
 
-        // Stroke (slightly darker blue outline)
-        ctx.lineWidth = 4; // Increased linewidth for better visibility
-        ctx.strokeStyle = 'rgba(70, 130, 180, 0.7)'; // SteelBlue, good opacity
+        // Stroke
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(70, 130, 180, 0.7)';
         ctx.stroke();
 
-        // Inner core (off-white/light blue)
+        // Inner core
         ctx.beginPath();
         ctx.arc(64, 64, 25, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(240, 248, 255, 0.95)'; // AliceBlue, high opacity
+        ctx.fillStyle = 'rgba(240, 248, 255, 0.95)';
         ctx.fill();
 
-        // Center dot (dark grey for bullseye effect and contrast)
+        // Center dot
         ctx.beginPath();
-        ctx.arc(64, 64, 8, 0, Math.PI * 2); // Slightly larger center dot
-        ctx.fillStyle = 'rgba(50, 50, 50, 0.8)'; // Dark grey, higher opacity
+        ctx.arc(64, 64, 8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(50, 50, 50, 0.8)';
         ctx.fill();
 
-        return new THREE.CanvasTexture(canvas);
+        this.arrowTexture = new THREE.CanvasTexture(canvas);
+        return this.arrowTexture;
     }
+
     createArrowMesh(linkData) {
         const texture = this.createArrowTexture();
         const geometry = new THREE.PlaneGeometry(0.3, 0.3); // Small size
@@ -655,8 +533,6 @@ export class PanoramaViewer {
 
         // Face the user (center)
         mesh.lookAt(0, 0, 0);
-        // No rotateX needed, billboard facing user
-
 
         mesh.userData.isInteractable = true;
         mesh.userData.originalScale = new THREE.Vector3(1, 1, 1);
@@ -699,7 +575,9 @@ export class PanoramaViewer {
         if (this.currentHotspots) {
             this.currentHotspots.forEach(mesh => {
                 this.group.remove(mesh);
-                if (mesh.material.map) mesh.material.map.dispose();
+                // DO NOT Dispose texture if it is the shared arrowTexture!
+                // We typically just dispose material if it was unique, but here we share standard arrow material map.
+                // But we created new Material each time in createArrowMesh, so we should dispose material.
                 mesh.material.dispose();
                 mesh.geometry.dispose();
             });
@@ -746,6 +624,14 @@ export class PanoramaViewer {
             this.currentAudio = null;
         }
         this.group.visible = false;
+    }
+
+    setVRMode(isVR) {
+        this.isVRMode = isVR;
+        // In VR, we might want to hide the floating back button 
+        // because the SubMenu handles it, or use Gaze.
+        // For now, let's keep it simple.
+        this.setBackButtonVisibility(!isVR);
     }
 
     update(delta) {
@@ -798,50 +684,14 @@ export class PanoramaViewer {
                 this.camera.getWorldPosition(cameraWorldPos);
             }
 
-            // Move the panorama sphere to follow the camera's world position
-            // This ensures both eyes see the panorama from the same center point
-            this.sphere.position.set(
-                cameraWorldPos.x - this.group.position.x,
-                cameraWorldPos.y - this.group.position.y,
-                cameraWorldPos.z - this.group.position.z
-            );
-        }
+            // Sync group position instead of just sphere, as controls need to follow too?
+            // Actually, normally we want panoram to be at 0,0,0 relative to user.
+            // If user walks in VR, we need sphere to follow them so they never reach the "wall".
+            this.group.position.copy(cameraWorldPos);
 
-        // Make control dock follow camera rotation (like SubMenu)
-        if (this.controlDock && this.camera) {
-            const cameraDirection = new THREE.Vector3();
-            this.camera.getWorldDirection(cameraDirection);
-
-            // Check if looking down
-            const pitch = Math.asin(cameraDirection.y);
-            const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI;
-
-            // Only rotate when NOT looking down at controls
-            if (pitch > -0.45) { // -0.45 rad ≈ -26 degrees (lowered threshold)
-                let currentAngle = this.controlDock.rotation.y;
-                let diff = targetAngle - currentAngle;
-
-                // Normalize to [-PI, PI]
-                while (diff > Math.PI) diff -= Math.PI * 2;
-                while (diff < -Math.PI) diff += Math.PI * 2;
-
-                // Smooth easing
-                this.controlDock.rotation.y += diff * 0.08;
-            }
-        }
-    }
-
-    setVRMode(isVR) {
-        this.isVRMode = isVR;
-
-        // Hide standard controls in VR mode (using tailored VR controls or Cardboard UI instead)
-        if (this.controlDock) {
-            // We might want to keep audio controls but hide back button? 
-            // For now, let's keep audio visible but hide Back button which is duplicated by CardboardUI
-            // actually, CardboardUI replaces the interactions.
-            // If we hide the whole dock, we lose audio.
-            // Let's just hide the back button for now.
-            this.setBackButtonVisibility(!isVR);
+            // But we must keep height? 
+            // Usually we want eye level (1.6) to coincide with horizon. 
+            // If we move group to camera pos, we effectively center it.
         }
     }
 }
