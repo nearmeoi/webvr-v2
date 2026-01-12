@@ -338,9 +338,9 @@ class App {
 
             if (location.projection === 'flat') {
                 // Flat mode: specific request for 2D HTML only.
-                // MUST EXIT VR (Stereo) Mode because pure HTML cannot be split-screened.
+                // MUST EXIT VR (Stereo) Mode but KEEP FULLSCREEN
                 if (this.isCardboardMode) {
-                    this.exitCardboardMode();
+                    this.exitCardboardMode(true);
                 }
                 this.stereoVideoPlayer.play2D(location.stereoVideo);
             } else {
@@ -524,22 +524,24 @@ class App {
     /**
      * Exit iOS Cardboard Mode
      */
-    exitCardboardMode() {
+    exitCardboardMode(keepFullscreen = false) {
         if (!this.isCardboardMode) return;
 
         // Force exit fullscreen (handle all vendor prefixes)
-        try {
-            if (document.exitFullscreen) {
-                document.exitFullscreen().catch(e => console.log('Fullscreen exit blocked/ignored:', e));
-            } else if (document.webkitExitFullscreen) {
-                document.webkitExitFullscreen();
-            } else if (document.mozCancelFullScreen) {
-                document.mozCancelFullScreen();
-            } else if (document.msExitFullscreen) {
-                document.msExitFullscreen();
+        if (!keepFullscreen) {
+            try {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen().catch(e => console.log('Fullscreen exit blocked/ignored:', e));
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.mozCancelFullScreen) {
+                    document.mozCancelFullScreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+            } catch (e) {
+                console.log('Exit fullscreen error:', e);
             }
-        } catch (e) {
-            console.log('Exit fullscreen error:', e);
         }
 
         // Sync CardboardButton state if it exists

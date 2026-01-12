@@ -414,6 +414,31 @@ export class StereoVideoPlayer {
         // Show HTML overlay
         this.showFullscreen();
 
+        // FORCE LANDSCAPE & FULLSCREEN for Mobile
+        // If already in fullscreen (e.g. from VR mode), we don't need to request again
+        // Requesting again without user gesture (Gaze) causes failure on Android
+        const isFS = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+
+        if (!isFS) {
+            const docEl = document.documentElement;
+            const requestFS = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+
+            if (requestFS) {
+                requestFS.call(docEl).then(() => {
+                    this.lockLandscape();
+                }).catch(e => {
+                    console.warn('Fullscreen request failed:', e);
+                    // Try locking anyway
+                    this.lockLandscape();
+                });
+            } else {
+                this.lockLandscape();
+            }
+        } else {
+            console.log('Already in Fullscreen, skipping request');
+            this.lockLandscape();
+        }
+
         // Hide 2D UI Overlay (CardboardUI) if active, just in case
         // (Handled by main.js usually, but good to ensure)
 
@@ -562,6 +587,22 @@ export class StereoVideoPlayer {
     toggleInteractiveButtons(visible) {
         if (this.controlDock) {
             this.controlDock.visible = visible;
+        }
+    }
+
+    lockLandscape() {
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(e => console.warn('Orientation lock failed:', e));
+            } else if (window.screen && window.screen.lockOrientation) {
+                window.screen.lockOrientation('landscape');
+            } else if (window.screen && window.screen.mozLockOrientation) {
+                window.screen.mozLockOrientation('landscape');
+            } else if (window.screen && window.screen.msLockOrientation) {
+                window.screen.msLockOrientation('landscape');
+            }
+        } catch (e) {
+            console.warn('Orientation control not supported:', e);
         }
     }
 
