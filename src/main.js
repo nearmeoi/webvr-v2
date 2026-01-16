@@ -140,6 +140,9 @@ class App {
         this.tutorialManager = new TutorialManager(this.scene, this.camera, this.renderer, this.gazeController, () => {
             // Optional: Action on tutorial complete
         });
+        
+        // Start tutorial immediately (overlays on Welcome Screen)
+        this.tutorialManager.checkAndStart();
 
         // Main panorama viewer with dynamic back handler
         this.panoramaViewer = new PanoramaViewer(this.scene, () => {
@@ -238,18 +241,15 @@ class App {
     }
 
     onWelcomeStart() {
+        // Complete the tutorial when Start is clicked
+        this.tutorialManager.triggerTeleport();
+
         this.welcomeScreen.hide();
         this.currentState = 'main-menu';
         this.orbitalMenu.show();
-        
-        // Check and start tutorial if first time
-        this.tutorialManager.checkAndStart();
     }
 
     onMainMenuSelect(index) {
-        // Mark tutorial step 3 (Navigation) as done if active
-        this.tutorialManager.triggerTeleport();
-
         const location = LOCATIONS[index];
         console.log('Main menu selected:', location.name);
 

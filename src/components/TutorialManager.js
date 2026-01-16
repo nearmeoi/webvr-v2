@@ -197,7 +197,7 @@ export class TutorialManager {
                 this.targetOrb.position.set(0, 0, -2);
                 break;
             case 3:
-                this.updateHudText('Navigasi', 'Coba pilih salah satu lokasi di menu');
+                this.updateHudText('Siap Jelajah?', 'Tatap tombol START di depan Anda');
                 this.targetOrb.visible = false;
                 break;
         }
