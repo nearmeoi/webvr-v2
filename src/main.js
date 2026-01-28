@@ -1,584 +1,376 @@
 import * as THREE from 'three';
+import './style.css';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GazeController } from './components/GazeController.js';
-import { OrbitalMenu, LOCATIONS } from './components/OrbitalMenu.js';
+import { OrbitalMenu } from './components/OrbitalMenu.js';
 import { SubMenu } from './components/SubMenu.js';
 import { PanoramaViewer } from './components/PanoramaViewer.js';
 import { StereoVideoPlayer } from './components/StereoVideoPlayer.js';
-import { WelcomeScreen } from './components/WelcomeScreen.js';
-import { GyroscopeControls } from './components/GyroscopeControls.js';
-import { StereoEffect } from './components/StereoEffect.js';
-import { CardboardUI } from './components/CardboardUI.js';
-import { CardboardButton } from './components/CardboardButton.js';
+import { CardboardModeManager } from './components/CardboardModeManager.js';
 import { isIOS, isWebXRSupported, isMobile, isCardboardForced } from './utils/deviceDetection.js';
+import { CONFIG } from './config.js';
+import { TOUR_DATA } from './data/tourData.js';
+import { TourDirector } from './components/TourDirector.js';
 
 class App {
     constructor() {
-        this.container = document.createElement('div');
-        document.body.appendChild(this.container);
-
-        this.scene = new THREE.Scene();
-
-        // UI for Cardboard Mode
-        this.cardboardUI = new CardboardUI(
-            () => this.exitCardboardMode(), // On Back
-            () => console.log('Settings clicked') // On Settings (placeholder)
-        );
-
-        // Detect iOS device OR forced Cardboard mode via URL (?cardboard=true)
+        // Device detection
         this.isIOSDevice = isIOS() || isCardboardForced();
         this.isMobileDevice = isMobile();
 
-        if (this.isIOSDevice) {
-            console.log('iOS/Cardboard mode enabled - using stereo rendering');
-        }
+        // State
+        this.currentState = 'welcome';
+        this.currentSubMenuParent = null;
+        this.isVRMode = false;
 
-        // --- IMPROVED BACKGROUND (Gradient) ---
-        this.createGradientBackground();
+        // Setup
+        this.initRenderer();
+        this.initCamera();
+        this.initControls();
+        this.initCardboardMode();
+        this.initScene();
+        this.initComponents();
+        this.initEventListeners();
+        this.initLandingScreen();
 
-        // Default FOV 60 (narrower than before), VR will use 50
-        this.defaultFOV = 60;
-        this.vrFOV = 50; // Narrower FOV for VR
-        this.minFOV = 30; // Max zoom in
-        this.maxFOV = 90; // Max zoom out
+        // Start render loop
+        this.clock = new THREE.Clock();
+        this.renderer.setAnimationLoop(this.render.bind(this));
+    }
 
-        this.camera = new THREE.PerspectiveCamera(this.defaultFOV, window.innerWidth / window.innerHeight, 0.1, 100);
-        this.scene.add(this.camera);
-        this.camera.position.set(0, 1.6, 0.1); // Offset for OrbitControls to work, raised to eye level
+    // ==================== INITIALIZATION ====================
 
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    initRenderer() {
+        this.container = document.createElement('div');
+        document.body.appendChild(this.container);
+
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            preserveDrawingBuffer: true // Required for screenshot transitions
+        });
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
 
-        // Only enable WebXR if NOT iOS (iOS doesn't support WebXR)
+        // Enable WebXR only for non-iOS devices
         if (!this.isIOSDevice && isWebXRSupported()) {
             this.renderer.xr.enabled = true;
             document.body.appendChild(VRButton.createButton(this.renderer));
         }
 
         this.container.appendChild(this.renderer.domElement);
+    }
 
-        // iOS Cardboard Mode - Stereo rendering for VR headsets like Google Cardboard
-        this.stereoEffect = null;
-        this.isCardboardMode = false;
+    initCamera() {
+        this.camera = new THREE.PerspectiveCamera(
+            CONFIG.fov.default,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            100
+        );
+        this.camera.position.set(0, CONFIG.camera.eyeLevel, CONFIG.camera.zOffset);
+    }
 
-        if (this.isIOSDevice) {
-            this.stereoEffect = new StereoEffect(this.renderer);
-            this.cardboardButton = new CardboardButton(
-                () => this.enterCardboardMode(),
-                () => this.exitCardboardMode()
-            );
-            this.createVignette();
-        }
-
-        // Controls (for desktop debugging and iOS fallback)
+    initControls() {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.05;
+        this.controls.dampingFactor = CONFIG.animation.dampingFactor;
         this.controls.screenSpacePanning = false;
-        this.controls.enableZoom = false; // Disable default zoom, we'll handle FOV zoom
-        this.controls.rotateSpeed = 0.5; // Slower rotation for more control
-        this.controls.target.set(0, 1.6, 0); // Target eye level
+        this.controls.enableZoom = false;
+        this.controls.rotateSpeed = CONFIG.animation.rotateSpeed;
+        this.controls.target.set(0, CONFIG.camera.eyeLevel, 0);
+    }
 
+    initCardboardMode() {
+        if (!this.isIOSDevice) return;
 
-        // Mouse wheel zoom (FOV-based zoom for panorama viewing)
-        this.container.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomSpeed = 2;
-            this.camera.fov += e.deltaY > 0 ? zoomSpeed : -zoomSpeed;
-            this.camera.fov = Math.max(this.minFOV, Math.min(this.maxFOV, this.camera.fov));
-            this.camera.updateProjectionMatrix();
-        }, { passive: false });
+        console.log('iOS/Cardboard mode enabled - using stereo rendering');
 
-        // VR session handling for narrower FOV (only if WebXR is enabled)
-        this.isVRMode = false;
+        this.cardboardManager = new CardboardModeManager(
+            this.renderer,
+            this.camera,
+            this.controls
+        );
+        this.cardboardManager.init();
+
+        // Sync mode changes with components
+        this.cardboardManager.onModeChange = (isVR) => {
+            if (this.panoramaViewer) {
+                this.panoramaViewer.setVRMode(isVR);
+                // Fix: If in cinematic tour, ensure back button stays hidden when exiting VR
+                if (!isVR && this.currentState === 'cinematic-tour') {
+                    this.panoramaViewer.setBackButtonVisibility(false);
+                }
+            }
+            if (this.stereoVideoPlayer) {
+                this.stereoVideoPlayer.setStereoMode(isVR && !!this.cardboardManager?.stereoEffect);
+            }
+        };
+    }
+
+    initScene() {
+        this.scene = new THREE.Scene();
+        this.scene.add(this.camera);
+
+        // Gradient background sphere
+        this.createGradientBackground();
+
+        // Lighting
+        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
+        this.scene.add(light);
+    }
+
+    initComponents() {
+        // Gaze controller
+        this.gazeController = new GazeController(this.camera, this.renderer);
+
+        // Panorama viewer
+        this.panoramaViewer = new PanoramaViewer(
+            this.scene,
+            () => this.onPanoramaBack(),
+            this.camera,
+            this.renderer
+        );
+
+        // Stereo video player
+        this.stereoVideoPlayer = new StereoVideoPlayer(
+            this.scene,
+            this.camera,
+            this.renderer,
+            () => this.onVideoBack(),
+            () => this.enterCardboardMode(),
+            () => this.exitCardboardMode()
+        );
+
+        // Orbital menu (hidden initially)
+        this.orbitalMenu = new OrbitalMenu(this.scene, this.camera, (index) => {
+            this.onMainMenuSelect(index);
+        });
+        this.orbitalMenu.hide();
+
+        // Sub-menu placeholder
+        this.subMenu = null;
+
+        // Tour Director for cinematic guided tour
+        this.tourDirector = new TourDirector(this);
+    }
+
+    initEventListeners() {
+        // Window resize
+        this.boundOnResize = this.onWindowResize.bind(this);
+        window.addEventListener('resize', this.boundOnResize);
+
+        // Mouse wheel FOV zoom
+        this.boundOnWheel = this.onWheel.bind(this);
+        this.container.addEventListener('wheel', this.boundOnWheel, { passive: false });
+
+        // WebXR session events
         if (this.renderer.xr.enabled) {
             this.renderer.xr.addEventListener('sessionstart', () => {
-                this.camera.fov = this.vrFOV;
+                this.camera.fov = CONFIG.fov.vr;
                 this.camera.updateProjectionMatrix();
                 this.isVRMode = true;
-                // Enable camera-following in VR
                 if (this.subMenu) this.subMenu.setVRMode(true);
                 this.panoramaViewer.setVRMode(true);
             });
+
             this.renderer.xr.addEventListener('sessionend', () => {
-                this.camera.fov = this.defaultFOV;
+                this.camera.fov = CONFIG.fov.default;
                 this.camera.updateProjectionMatrix();
                 this.isVRMode = false;
                 if (this.subMenu) this.subMenu.setVRMode(false);
                 this.panoramaViewer.setVRMode(false);
             });
+
         }
 
-        // Gyroscope controls for iOS (fallback for VR-like experience)
-        this.gyroscopeControls = null;
-        this.gyroscopeEnabled = false;
+        // Mouse Click Interaction (Desktop)
+        window.addEventListener('click', (event) => {
+            // Ignore clicks if in VR mode (handled by controller selection)
+            if (this.isVRMode) return;
 
-        // Lights
-        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
-        this.scene.add(light);
+            // Use canvas bounds for accurate mouse position
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-        // State tracking
-        this.currentState = 'welcome'; // Start at welcome
-        this.currentSubMenuParent = null;
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, this.camera);
 
-        // Components
-        this.gazeController = new GazeController(this.camera, this.renderer);
+            // Force update ALL world matrices before raycasting
+            this.scene.updateMatrixWorld(true);
 
-        // Welcome Screen - also handles gyroscope permission request on iOS
-        this.welcomeScreen = new WelcomeScreen(this.scene, async () => {
-            // Request gyroscope permission on iOS when user taps Start
-            if (this.isIOSDevice && !this.gyroscopeEnabled) {
-                await this.initGyroscope();
+            const interactables = this.getInteractables();
+            console.log('[DEBUG] Click - Interactables count:', interactables.length);
+
+            // Log first button world position if available
+            if (this.tourDirector?.pauseBtn) {
+                const worldPos = new THREE.Vector3();
+                this.tourDirector.pauseBtn.getWorldPosition(worldPos);
+                console.log('[DEBUG] Pause button world pos:', worldPos.x.toFixed(2), worldPos.y.toFixed(2), worldPos.z.toFixed(2));
+                console.log('[DEBUG] Ray origin:', raycaster.ray.origin.x.toFixed(2), raycaster.ray.origin.y.toFixed(2), raycaster.ray.origin.z.toFixed(2));
+                console.log('[DEBUG] Ray direction:', raycaster.ray.direction.x.toFixed(2), raycaster.ray.direction.y.toFixed(2), raycaster.ray.direction.z.toFixed(2));
             }
-            this.onWelcomeStart();
-        });
 
-        // Main panorama viewer with dynamic back handler
-        this.panoramaViewer = new PanoramaViewer(this.scene, () => {
-            this.onPanoramaBack();
-        }, this.camera, this.renderer);
+            const intersects = raycaster.intersectObjects(interactables, true);
+            console.log('[DEBUG] Intersects count:', intersects.length);
 
-        // Stereo video player for side-by-side VR videos
-        this.stereoVideoPlayer = new StereoVideoPlayer(
-            this.scene,
-            this.camera,
-            this.renderer,
-            () => {
-                this.onVideoBack();
-            },
-            () => {
-                // On Enter VR request (from video player)
-                if (this.isMobileDevice || this.isIOSDevice) {
-                    this.enterCardboardMode();
+            // Log all intersects with distances
+            intersects.forEach((hit, i) => {
+                console.log(`[DEBUG] Hit ${i}: distance=${hit.distance.toFixed(2)}, name=${hit.object.name || hit.object.userData?.label || 'unknown'}`);
+            });
+
+            if (intersects.length > 0) {
+                let target = intersects[0].object;
+                console.log('[DEBUG] First hit object:', target.userData?.label || target.name || 'unknown');
+
+                // Traverse up to find the interactable group/mesh
+                while (target && !target.userData.isInteractable && target.parent) {
+                    target = target.parent;
                 }
-            },
-            () => {
-                // On Exit VR request (from video player)
-                if (this.isCardboardMode) {
-                    this.exitCardboardMode();
+
+                if (target && target.userData.isInteractable && target.onClick) {
+                    console.log('[DEBUG] Triggering onClick for:', target.userData?.label || 'button');
+                    // Trigger click immediately
+                    target.onClick(intersects[0]);
+
+                    // Reset gaze timer if we clicked what we were looking at
+                    if (this.gazeController && this.gazeController.hoveredObject === target) {
+                        this.gazeController.hoverTime = 0;
+                        this.gazeController.progressMesh.scale.set(0, 0, 1);
+                    }
                 }
             }
-        );
-
-        // Main orbital menu (Hidden initially)
-        this.orbitalMenu = new OrbitalMenu(this.scene, this.camera, (index) => {
-            this.onMainMenuSelect(index);
         });
-        this.orbitalMenu.hide(); // Hide at start
-
-        // Sub-menu (will be created dynamically)
-        this.subMenu = null;
-
-        window.addEventListener('resize', this.onWindowResize.bind(this));
-
-        this.renderer.setAnimationLoop(this.render.bind(this));
-
-        // Initialize Landing Screen logic
-        this.initLandingScreen();
     }
 
     initLandingScreen() {
         const landingScreen = document.getElementById('landing-screen');
         const enterBtn = document.getElementById('enter-vr-btn');
 
-        if (enterBtn) {
-            enterBtn.addEventListener('click', async () => {
-                // 1. Request Fullscreen
-                const el = document.documentElement;
-                if (el.requestFullscreen) {
-                    await el.requestFullscreen().catch(e => console.log('Fullscreen blocked:', e));
-                } else if (el.webkitRequestFullscreen) {
-                    el.webkitRequestFullscreen();
+        if (!enterBtn) return;
+
+        enterBtn.addEventListener('click', async () => {
+            // Request fullscreen
+            await this.requestFullscreen();
+
+            // Lock landscape
+            this.lockLandscape();
+
+            // Resume audio context
+            if (THREE.AudioContext?.state === 'suspended') {
+                THREE.AudioContext.resume();
+            }
+
+            // Fade out landing screen
+            landingScreen.style.opacity = '0';
+            setTimeout(() => {
+                landingScreen.style.display = 'none';
+            }, 500);
+
+            // Show welcome screen 
+            // CINEMATIC MODE: Skip welcome screen, go straight to director?
+            // Or keep welcome screen but 'Enter' starts the tour?
+
+            // Hide menu just in case
+            if (this.orbitalMenu) this.orbitalMenu.hide();
+
+            // Start Director
+            if (this.tourDirector) {
+                console.log('Starting Cinematic Tour...');
+                this.tourDirector.start();
+            }
+
+            // Enter cardboard mode on mobile (slight delay for fullscreen)
+            setTimeout(() => {
+                if (this.isMobileDevice || this.isIOSDevice) {
+                    this.enterCardboardMode();
                 }
-
-                // 2. Lock Landscape
-                try {
-                    if (screen.orientation && screen.orientation.lock) {
-                        screen.orientation.lock('landscape').catch(e => console.log('Orientation lock warning:', e));
-                    } else if (window.screen && window.screen.lockOrientation) {
-                        window.screen.lockOrientation('landscape');
-                    }
-                } catch (e) {
-                    console.warn('Rotation lock not supported');
-                }
-
-                // 3. Audio Context Resume (if needed for future audio)
-                if (THREE.AudioContext && THREE.AudioContext.state === 'suspended') {
-                    THREE.AudioContext.resume();
-                }
-
-                // 4. Hide Landing Screen
-                landingScreen.style.opacity = '0';
-                setTimeout(() => {
-                    landingScreen.style.display = 'none';
-                }, 500);
-
-                // 5. Enter VR Mode
-                // Show Welcome Screen first (Default Entry)
-                this.orbitalMenu.hide(); // Ensure Menu is hidden!
-                if (this.welcomeScreen) this.welcomeScreen.show();
-
-                // Slight delay to ensure fullscreen is active before splitting screen
-                setTimeout(() => {
-                    if (this.isMobileDevice || this.isIOSDevice) {
-                        this.enterCardboardMode();
-                    }
-                }, 100);
-            });
-        }
+            }, 100);
+        });
     }
 
-    createVignette() {
-        // Vignette removed for full screen Cardboard view
-        /*
-        this.vignette = document.createElement('div');
-        Object.assign(this.vignette.style, {
-            position: 'fixed',
-            top: '0',
-            left: '0',
-            width: '100%',
-            height: '100%',
-            pointerEvents: 'none',
-            display: 'none',
-            zIndex: '998' // Below VR button (999)
-        });
-
-        // Left Eye Vignette
-        const leftEye = document.createElement('div');
-        Object.assign(leftEye.style, {
-            position: 'absolute',
-            left: '0',
-            top: '0',
-            width: '50%',
-            height: '100%',
-            background: 'radial-gradient(circle at center, transparent 50%, black 50.5%)'
-        });
-
-        // Right Eye Vignette
-        const rightEye = document.createElement('div');
-        Object.assign(rightEye.style, {
-            position: 'absolute',
-            right: '0',
-            top: '0',
-            width: '50%',
-            height: '100%',
-            background: 'radial-gradient(circle at center, transparent 50%, black 50.5%)'
-        });
-
-        this.vignette.appendChild(leftEye);
-        this.vignette.appendChild(rightEye);
-        document.body.appendChild(this.vignette);
-        */
-    }
+    // ==================== BACKGROUND ====================
 
     createGradientBackground() {
-        // Create a large sphere for the background
-        const geometry = new THREE.SphereGeometry(80, 32, 32);
-        geometry.scale(-1, 1, 1); // Invert normals
+        const geometry = new THREE.SphereGeometry(CONFIG.background.radius, 32, 32);
+        geometry.scale(-1, 1, 1);
 
-        // Generate Gradient Texture
         const canvas = document.createElement('canvas');
-        canvas.width = 512;
+        canvas.width = 1024; // Better resolution for crisp lines
         canvas.height = 512;
         const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
 
-        // Radial Gradient: Dark Blue/Purple to Black
-        // Center of gradient at bottom (0.5, 1.0) for "horizon" feel or center?
-        // Let's do a top-down gradient.
-        const gradient = ctx.createLinearGradient(0, 0, 0, 512);
-        gradient.addColorStop(0, '#4F657B'); // Top: Even Darker Muted Blue
-        gradient.addColorStop(1, '#20355A'); // Bottom: Very Dark Deep Blue
+        // 1. Solid Dark Background (Requested: Hitam Gelap)
+        ctx.fillStyle = '#111111'; // Very dark grey, almost black
+        ctx.fillRect(0, 0, w, h);
 
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 512, 512);
+        // 2. Minimalist Grid (Requested: Sedikit garis penanda arah)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 2;
 
-        // Removed "stars" (noise) for a simpler look
+        // A. Horizon Line (Depan/Belakang/Kiri/Kanan horizontal guide)
+        ctx.beginPath();
+        ctx.moveTo(0, h / 2);
+        ctx.lineTo(w, h / 2);
+        ctx.stroke();
+
+        // B. Vertical Cardinal Lines (North, East, South, West)
+        // 4 lines acting as compass bearings
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < w; i += w / 4) {
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, h);
+        }
+        ctx.stroke();
+
+        // C. Zenith/Nadir Markers (Atas/Bawah)
+        // Just simple crosses at top and bottom poles would be distorted.
+        // The vertical lines converging at poles already indicate Up/Down.
+        // Let's add simple rim at top/bottom for "lid" feel.
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(w, 0); // Top rim
+        ctx.moveTo(0, h); ctx.lineTo(w, h); // Bottom rim
+        ctx.stroke();
 
         const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
         const material = new THREE.MeshBasicMaterial({ map: texture });
         const bgMesh = new THREE.Mesh(geometry, material);
         this.scene.add(bgMesh);
     }
 
-    onWelcomeStart() {
-        this.welcomeScreen.hide();
-        this.currentState = 'main-menu';
-        this.orbitalMenu.show();
-    }
+    // ==================== CARDBOARD MODE HELPERS ====================
 
-    onMainMenuSelect(index) {
-        const location = LOCATIONS[index];
-        console.log('Main menu selected:', location.name);
-
-        if (location.subLocations && location.subLocations.length > 0) {
-            // Toraja Mode: Auto-load Welcome + Persistent Overlay Menu
-            this.orbitalMenu.hide();
-
-            // Show sub menu as overlay
-            this.showSubMenu(location);
-
-            // Auto load first location (Welcome)
-            this.panoramaViewer.loadFromLocation(location.subLocations[0]);
-
-            // Hide standard "Back to Menu" button inside panorama
-            // We use the SubMenu's back button instead
-            this.panoramaViewer.setBackButtonVisibility(false);
-
-            // Position audio buttons far right (avoid dock collision)
-            this.panoramaViewer.setAudioButtonsPosition('with-dock');
-
-            this.currentState = 'toraja-mode';
-        } else if (location.stereoVideo) {
-            // Stereo Video Mode: Fullscreen side-by-side VR video
-            this.orbitalMenu.hide();
-            this.currentState = 'stereo-video';
-            this.currentSubMenuParent = null;
-
-            if (location.projection === 'flat') {
-                // Flat mode: specific request for 2D HTML only.
-                // MUST EXIT VR (Stereo) Mode but KEEP FULLSCREEN
-                if (this.isCardboardMode) {
-                    this.exitCardboardMode(true);
-                }
-                this.stereoVideoPlayer.play2D(location.stereoVideo);
-            } else {
-                // VR/Curved mode: Standard 3D VR player
-                this.stereoVideoPlayer.load(location.stereoVideo, true, location.projection || 'curved', location.format || 'stereo');
-
-                // Enable stereo mode if in Cardboard mode
-                if (this.isCardboardMode) {
-                    this.stereoVideoPlayer.setStereoMode(true);
-                }
-            }
-
-            // Disable camera controls for focused video viewing
-            // ENABLED FOR DESKTOP TESTING
-            if (this.controls) {
-                this.controls.enabled = true;
-            }
-
-            // Enable stereo mode if in Cardboard mode
-            if (this.isCardboardMode) {
-                this.stereoVideoPlayer.setStereoMode(true);
-            }
-        } else {
-            // Standard Mode: Zoom into panorama
-            this.orbitalMenu.hide();
-            this.currentState = 'panorama';
-            this.currentSubMenuParent = null;
-            this.panoramaViewer.loadFromLocation(location);
-
-            // Ensure standard back button is visible
-            this.panoramaViewer.setBackButtonVisibility(true);
-
-            // Position audio buttons close to back (standalone mode)
-            this.panoramaViewer.setAudioButtonsPosition('standalone');
+    enterCardboardMode() {
+        if (this.cardboardManager) {
+            this.cardboardManager.enter();
         }
     }
 
-    showSubMenu(parentLocation) {
-        // Remove existing sub-menu if any
-        if (this.subMenu) {
-            this.scene.remove(this.subMenu.group);
-            this.subMenu = null;
-        }
-
-        this.currentSubMenuParent = parentLocation;
-
-        this.subMenu = new SubMenu(
-            this.scene,
-            this.camera,
-            parentLocation,
-            (subLocation) => {
-                this.onSubMenuSelect(subLocation);
-            },
-            () => {
-                this.onSubMenuBack();
-            }
-        );
-        this.subMenu.show();
-        // Highlight first item (Welcome) initially
-        this.subMenu.setActive(0);
-
-        // Sync VR mode state
-        if (this.isVRMode) this.subMenu.setVRMode(true);
-    }
-
-    onSubMenuSelect(subLocation) {
-        // Switch panorama scene only, keep menu visible
-        console.log('Switching to scene:', subLocation.name);
-        this.panoramaViewer.loadFromLocation(subLocation);
-    }
-
-    onSubMenuBack() {
-        // Create clean exit from Toraja mode
-        if (this.subMenu) this.subMenu.hide();
-        this.panoramaViewer.hide();
-        this.currentState = 'main-menu';
-        this.currentSubMenuParent = null;
-        this.orbitalMenu.show();
-    }
-
-    onPanoramaBack() {
-        // Standard back button handler (only visible for non-Toraja items)
-        this.panoramaViewer.hide();
-        this.currentState = 'main-menu';
-        this.orbitalMenu.show();
-    }
-
-    onVideoBack() {
-        // Back from stereo video player
-        this.stereoVideoPlayer.hide();
-        this.currentState = 'main-menu';
-        this.orbitalMenu.show();
-
-        // Re-enable camera controls
-        if (this.controls) {
-            this.controls.enabled = true;
-        }
-    }
-
-    /**
-     * Initialize gyroscope controls for iOS devices
-     * Must be called after a user gesture (tap/click)
-     */
-    async initGyroscope() {
-        if (this.gyroscopeEnabled) return;
-
-        this.gyroscopeControls = new GyroscopeControls(this.camera, this.renderer.domElement);
-        const success = await this.gyroscopeControls.enable();
-
-        if (success) {
-            this.gyroscopeEnabled = true;
-            // Optionally disable OrbitControls when gyroscope is active
-            // Or keep both enabled for hybrid control
-            console.log('Gyroscope controls initialized for iOS');
-        } else {
-            console.log('Gyroscope initialization failed, falling back to touch controls');
-        }
-    }
-
-    /**
-     * Enter iOS Cardboard Mode (split-screen stereo VR)
-     */
-    async enterCardboardMode() {
-        if (this.isCardboardMode) return;
-
-        // Initialize gyroscope if not already done
-        if (!this.gyroscopeEnabled) {
-            await this.initGyroscope();
-        }
-
-        // Enable stereo effect
-        if (this.stereoEffect) {
-            this.stereoEffect.enable();
-        }
-
-        // Show Vignette
-        if (this.vignette) {
-            this.vignette.style.display = 'block';
-        }
-
-        // Request Fullscreen
-        const el = document.documentElement;
-        if (el.requestFullscreen) {
-            el.requestFullscreen().catch(e => console.log('Fullscreen blocked:', e));
-        } else if (el.webkitRequestFullscreen) {
-            el.webkitRequestFullscreen();
-        } else if (el.mozRequestFullScreen) {
-            el.mozRequestFullScreen();
-        } else if (el.msRequestFullscreen) {
-            el.msRequestFullscreen();
-        }
-
-        // Disable OrbitControls in cardboard mode (gyroscope takes over)
-        // ENABLED FOR TESTING: User request to allow dragging
-        /*
-        if (this.controls) {
-            this.controls.enabled = false;
-        }
-        */
-
-        // Set VR-like camera settings
-        this.camera.fov = this.vrFOV;
-        this.camera.updateProjectionMatrix();
-
-        this.isCardboardMode = true;
-
-        // Let components know we are in a VR-like mode
-        if (this.panoramaViewer) this.panoramaViewer.setVRMode(true);
-        // Ensure video player switches to stereo layers ONLY if we are actually rendering stereo
-        // (i.e. we have a stereoEffect active). On Desktop, keep it False (Mono) so it's visible.
-        if (this.stereoVideoPlayer) {
-            this.stereoVideoPlayer.setStereoMode(!!this.stereoEffect);
-        }
-
-        // Show 2D UI Overlay
-        if (this.cardboardUI) this.cardboardUI.show();
-
-        console.log('Entered Cardboard VR mode');
-    }
-
-    /**
-     * Exit iOS Cardboard Mode
-     */
     exitCardboardMode(keepFullscreen = false) {
-        if (!this.isCardboardMode) return;
-
-        // Force exit fullscreen (handle all vendor prefixes)
-        if (!keepFullscreen) {
-            try {
-                if (document.exitFullscreen) {
-                    document.exitFullscreen().catch(e => console.log('Fullscreen exit blocked/ignored:', e));
-                } else if (document.webkitExitFullscreen) {
-                    document.webkitExitFullscreen();
-                } else if (document.mozCancelFullScreen) {
-                    document.mozCancelFullScreen();
-                } else if (document.msExitFullscreen) {
-                    document.msExitFullscreen();
-                }
-            } catch (e) {
-                console.log('Exit fullscreen error:', e);
-            }
+        if (this.cardboardManager) {
+            this.cardboardManager.exit(keepFullscreen);
         }
+    }
 
-        // Sync CardboardButton state if it exists
-        if (this.cardboardButton) {
-            this.cardboardButton.isInVR = false;
-            this.cardboardButton.updateButtonStyle(false);
-        }
+    get isCardboardMode() {
+        return this.cardboardManager?.isCardboardMode ?? false;
+    }
 
-        // Disable stereo effect
-        if (this.stereoEffect) {
-            this.stereoEffect.disable();
-        }
+    // ==================== EVENT HANDLERS ====================
 
-        // Hide Vignette
-        if (this.vignette) {
-            this.vignette.style.display = 'none';
-        }
-
-        // Re-enable OrbitControls
-        if (this.controls) {
-            this.controls.enabled = true;
-        }
-
-        // Reset camera
-        this.camera.fov = this.defaultFOV;
+    onWheel(e) {
+        e.preventDefault();
+        const zoomSpeed = 2;
+        this.camera.fov += e.deltaY > 0 ? zoomSpeed : -zoomSpeed;
+        this.camera.fov = Math.max(CONFIG.fov.min, Math.min(CONFIG.fov.max, this.camera.fov));
         this.camera.updateProjectionMatrix();
-
-        this.isCardboardMode = false;
-
-        // Reset VR mode in components
-        if (this.panoramaViewer) this.panoramaViewer.setVRMode(false);
-        if (this.stereoVideoPlayer) this.stereoVideoPlayer.setStereoMode(false);
-
-        // Hide 2D UI Overlay
-        if (this.cardboardUI) this.cardboardUI.hide();
-
-        console.log('Exited Cardboard VR mode');
     }
 
     onWindowResize() {
@@ -587,46 +379,262 @@ class App {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
+    onWelcomeStart() {
+        this.welcomeScreen.hide();
+        this.currentState = 'cinematic-tour';
+
+        // CINEMATIC MODE: Start Director instead of Menu
+        if (this.tourDirector) {
+            console.log('Welcome Screen completed. Starting Cinematic Tour...');
+            this.tourDirector.start();
+        } else {
+            // Fallback to menu if no director
+            this.currentState = 'main-menu';
+            this.orbitalMenu.show();
+        }
+    }
+
+    onMainMenuSelect(index) {
+        const location = TOUR_DATA[index];
+        console.log('Main menu selected:', location.title);
+
+        if (location.subLocations?.length > 0) {
+            this.enterTorajaMode(location);
+        } else if (location.stereoVideo) {
+            this.enterStereoVideoMode(location);
+        } else {
+            this.enterPanoramaMode(location);
+        }
+    }
+
+    /**
+     * Load a location by index - used by TourDirector
+     */
+    loadLocation(index) {
+        const location = TOUR_DATA[index];
+        if (!location) {
+            console.error('Invalid location index:', index);
+            return;
+        }
+
+        console.log('Loading location:', location.title);
+        this.currentState = 'cinematic-tour';
+
+        // Hide menu if visible
+        if (this.orbitalMenu) this.orbitalMenu.hide();
+        if (this.subMenu) this.subMenu.hide();
+
+        // Load panorama
+        this.panoramaViewer.loadFromLocation(location);
+        this.panoramaViewer.setBackButtonVisibility(false); // No back in tour mode
+        this.panoramaViewer.setAudioButtonsPosition('standalone');
+
+        // CRITICAL FIX: Hide legacy AudioControls from PanoramaViewer
+        // They overlap with TourDirector's navigation buttons
+        if (this.panoramaViewer.audioControls) {
+            this.panoramaViewer.audioControls.setVisible(false);
+            // BRUTE FORCE: Move them to infinity to ensure no raycast hits
+            this.panoramaViewer.audioControls.setPosition('standalone', { y: 10000 });
+        }
+    }
+
+    enterTorajaMode(location) {
+        this.orbitalMenu.hide();
+        this.showSubMenu(location);
+        this.panoramaViewer.loadFromLocation(location.subLocations[0]);
+        this.panoramaViewer.setBackButtonVisibility(false);
+
+        // Pass dynamic angle from SubMenu logic
+        const lastItemTheta = this.subMenu.getLastItemTheta();
+        this.panoramaViewer.setAudioButtonsPosition('with-dock', location.subLocations.length, lastItemTheta);
+
+        this.currentState = 'toraja-mode';
+    }
+
+    enterStereoVideoMode(location) {
+        this.orbitalMenu.hide();
+        this.currentState = 'stereo-video';
+        this.currentSubMenuParent = null;
+
+        if (location.projection === 'flat') {
+            // 2D HTML video player
+            if (this.isCardboardMode) {
+                this.exitCardboardMode(true);
+            }
+            this.stereoVideoPlayer.play2D(location.stereoVideo);
+        } else {
+            // 3D VR video player
+            this.stereoVideoPlayer.load(
+                location.stereoVideo,
+                true,
+                location.projection || 'curved',
+                location.format || 'stereo'
+            );
+            if (this.isCardboardMode) {
+                this.stereoVideoPlayer.setStereoMode(true);
+            }
+        }
+
+        if (this.controls) this.controls.enabled = true;
+    }
+
+    enterPanoramaMode(location) {
+        this.orbitalMenu.hide();
+        this.currentState = 'panorama';
+        this.currentSubMenuParent = null;
+        this.panoramaViewer.loadFromLocation(location);
+        this.panoramaViewer.setBackButtonVisibility(true);
+        this.panoramaViewer.setAudioButtonsPosition('standalone');
+    }
+
+    showSubMenu(parentLocation) {
+        if (this.subMenu) {
+            this.scene.remove(this.subMenu.group);
+            this.subMenu = null;
+        }
+
+        this.currentSubMenuParent = parentLocation;
+        this.subMenu = new SubMenu(
+            this.scene,
+            this.camera,
+            parentLocation,
+            (subLocation) => this.onSubMenuSelect(subLocation),
+            () => this.onSubMenuBack()
+        );
+        this.subMenu.show();
+        this.subMenu.setActive(0);
+
+        if (this.isVRMode) this.subMenu.setVRMode(true);
+    }
+
+    onSubMenuSelect(subLocation) {
+        console.log('Switching to scene:', subLocation.name);
+        this.panoramaViewer.loadFromLocation(subLocation);
+    }
+
+    onSubMenuBack() {
+        if (this.subMenu) this.subMenu.hide();
+        this.panoramaViewer.hide();
+        this.currentState = 'main-menu';
+        this.currentSubMenuParent = null;
+        this.orbitalMenu.show();
+    }
+
+    onPanoramaBack() {
+        if (this.currentState === 'cinematic-tour') return;
+        this.panoramaViewer.hide();
+        this.currentState = 'main-menu';
+        this.orbitalMenu.show();
+    }
+
+    onVideoBack() {
+        this.stereoVideoPlayer.hide();
+        this.currentState = 'main-menu';
+        this.orbitalMenu.show();
+        if (this.controls) this.controls.enabled = true;
+    }
+
+    // ==================== UTILITIES ====================
+
+    async requestFullscreen() {
+        const el = document.documentElement;
+        try {
+            if (el.requestFullscreen) {
+                await el.requestFullscreen();
+            } else if (el.webkitRequestFullscreen) {
+                el.webkitRequestFullscreen();
+            }
+        } catch (e) {
+            console.log('Fullscreen blocked:', e);
+        }
+    }
+
+    lockLandscape() {
+        try {
+            if (screen.orientation?.lock) {
+                screen.orientation.lock('landscape').catch(() => { });
+            } else if (window.screen?.lockOrientation) {
+                window.screen.lockOrientation('landscape');
+            }
+        } catch (e) {
+            console.warn('Rotation lock not supported');
+        }
+    }
+
+    // ==================== RENDER LOOP ====================
+
     render() {
-        const delta = 0.016; // Fixed delta for simplicity or use clock
+        const delta = this.clock.getDelta();
 
         // Update controls
         if (this.controls) this.controls.update();
 
-        // Update gyroscope controls if enabled (iOS)
-        if (this.gyroscopeControls && this.gyroscopeEnabled) {
-            this.gyroscopeControls.update();
+        // Update cardboard manager (gyroscope)
+        if (this.cardboardManager) {
+            this.cardboardManager.update();
         }
 
-        // Update gaze - check VISIBLE groups only
-        const interactables = [];
-        // Add Welcome Screen to interactables if visible
-        if (this.welcomeScreen && this.welcomeScreen.group.visible) {
-            // Need to pass the mesh itself, usually group doesn't trigger intersect unless recursive=true
-            // GazeController uses recursive=true, so passing group is fine
-            interactables.push(this.welcomeScreen.group);
-        }
+        // Build interactables list
+        const interactables = this.getInteractables();
 
-        if (this.orbitalMenu.group.visible) interactables.push(this.orbitalMenu.group);
-        if (this.subMenu && this.subMenu.group.visible) interactables.push(this.subMenu.group);
-        if (this.panoramaViewer.group.visible) interactables.push(this.panoramaViewer.group);
-        if (this.stereoVideoPlayer && this.stereoVideoPlayer.group.visible) interactables.push(this.stereoVideoPlayer.group);
-
+        // Update gaze controller
         this.gazeController.update(this.scene, interactables, delta);
 
         // Update components
         if (this.welcomeScreen) this.welcomeScreen.update(delta);
+
+        // SAFEGUARD: Ensure Orbital Menu is hidden in Cinematic Mode
+        if (this.currentState === 'cinematic-tour' && this.orbitalMenu.group.visible) {
+            this.orbitalMenu.hide();
+        }
         this.orbitalMenu.update(delta);
         if (this.subMenu) this.subMenu.update(delta);
         this.panoramaViewer.update(delta);
         if (this.stereoVideoPlayer) this.stereoVideoPlayer.update(delta);
-        // Render - use stereo effect if in Cardboard mode (iOS)
-        // Render - use stereo effect if in Cardboard mode (iOS)
-        if (this.isCardboardMode && this.stereoEffect) {
-            this.stereoEffect.render(this.scene, this.camera);
-        } else {
+
+        // Update TourDirector
+        if (this.tourDirector) this.tourDirector.update(delta);
+
+        // Render (stereo or normal)
+        const usedStereo = this.cardboardManager?.render(this.scene, this.camera);
+        if (!usedStereo) {
             this.renderer.render(this.scene, this.camera);
         }
+    }
+
+    getInteractables() {
+        const list = [];
+
+        // TourDirector buttons FIRST for click priority
+        if (this.tourDirector) {
+            const tourButtons = this.tourDirector.getInteractables();
+            list.push(...tourButtons);
+        }
+
+        // Then other UI elements
+        if (this.welcomeScreen?.group.visible) list.push(this.welcomeScreen.group);
+        if (this.orbitalMenu.group.visible) list.push(this.orbitalMenu.group);
+        if (this.subMenu?.group.visible) list.push(this.subMenu.group);
+        if (this.panoramaViewer.group.visible) list.push(this.panoramaViewer.group);
+        if (this.stereoVideoPlayer?.group.visible) list.push(this.stereoVideoPlayer.group);
+
+        return list;
+    }
+
+    // ==================== CLEANUP ====================
+
+    dispose() {
+        // Remove event listeners
+        window.removeEventListener('resize', this.boundOnResize);
+        this.container.removeEventListener('wheel', this.boundOnWheel);
+
+        // Dispose components
+        this.tourDirector?.dispose?.();
+        this.panoramaViewer?.dispose?.();
+        this.gazeController?.dispose?.();
+        this.cardboardManager?.dispose();
+        this.stereoVideoPlayer?.dispose();
+        this.orbitalMenu?.dispose?.();
     }
 }
 

@@ -51,7 +51,7 @@ export const CanvasUI = {
 
         // Draw Text
         ctx.fillStyle = 'white';
-        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.font = `bold ${fontSize}px Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -197,7 +197,7 @@ export const CanvasUI = {
         const ctx = canvas.getContext('2d');
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 24px sans-serif';
+        ctx.font = 'bold 24px Roboto, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('Loading...', 128, 32);

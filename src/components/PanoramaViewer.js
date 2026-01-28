@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { LOCATIONS } from './OrbitalMenu.js';
+import { TOUR_DATA } from '../data/tourData.js'; // Import data for reference if needed
 import { CanvasUI } from '../utils/CanvasUI.js';
+import { AudioControls } from './AudioControls.js';
+import { CONFIG } from '../config.js';
 
 export class PanoramaViewer {
     constructor(scene, onBack, camera, renderer) {
@@ -13,14 +15,18 @@ export class PanoramaViewer {
         this.scene.add(this.group);
         this.group.visible = false; // Hidden initially
         this.currentAudio = null;
-        this.isPlaying = false;
-        this.isMuted = false;
 
         // 1. Sphere Pano (radius must be < camera far clip)
-        const geometry = new THREE.SphereGeometry(50, 60, 40);
+        const geometry = new THREE.SphereGeometry(50, 64, 32); // Reduced segments as parallax is gone
         geometry.scale(-1, 1, 1);
-        this.material = new THREE.MeshBasicMaterial({ map: null });
-        this.sphere = new THREE.Mesh(geometry, this.material);
+
+        // Basic material only
+        this.basicMaterial = new THREE.MeshBasicMaterial({ map: null });
+
+        // ControlDock camera following state
+        this.dockCenterOffset = 0; // Will be set by setAudioButtonsPosition
+
+        this.sphere = new THREE.Mesh(geometry, this.basicMaterial);
         this.group.add(this.sphere);
 
         // 2. Control Dock (follows camera)
@@ -28,7 +34,8 @@ export class PanoramaViewer {
         this.group.add(this.controlDock);
 
         this.createBackButton();
-        this.createAudioControls();
+        this.audioControls = new AudioControls(this.controlDock);
+        this.audioControls.setVisible(false); // Hide legacy buttons (we use Unified Dock now)
         this.createLoadingIndicator();
 
         this.textureLoader = new THREE.TextureLoader();
@@ -40,34 +47,31 @@ export class PanoramaViewer {
         // Reuse arrow texture for all hotspots to save memory
         this.arrowTexture = null;
 
-        // TEMP DEBUG: Click to get angle (Restored for correction)
-        window.addEventListener('click', (event) => {
-            if (!this.group.visible) return;
+        // DEBUG: Click to get angle (only enabled for development)
+        const DEBUG_MODE = false; // Set to true to enable angle debugging
+        if (DEBUG_MODE) {
+            this.onDebugClick = (event) => {
+                if (!this.group.visible) return;
 
-            const mouse = new THREE.Vector2();
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                const mouse = new THREE.Vector2();
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-            const raycaster = new THREE.Raycaster();
-            raycaster.setFromCamera(mouse, this.camera);
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(mouse, this.camera);
 
-            const intersects = raycaster.intersectObject(this.sphere);
-            if (intersects.length > 0) {
-                // Convert world point to LOCAL coordinates of the sphere
-                const worldPoint = intersects[0].point;
-                const localPoint = this.sphere.worldToLocal(worldPoint.clone());
-
-                // Calculate angle from local coordinates (consistent regardless of camera rotation)
-                // Since the sphere is scaled -1 on X (geometry.scale(-1,1,1)), we need to account for that
-                let angleDeg = Math.atan2(localPoint.x, -localPoint.z) * (180 / Math.PI);
-
-                if (angleDeg < 0) angleDeg += 360;
-                angleDeg = Math.round(angleDeg);
-
-                // Log to console for debugging
-                console.log(`ANGLE: ${angleDeg}° (click same spot on panorama = same angle)`);
-            }
-        });
+                const intersects = raycaster.intersectObject(this.sphere);
+                if (intersects.length > 0) {
+                    const worldPoint = intersects[0].point;
+                    const localPoint = this.sphere.worldToLocal(worldPoint.clone());
+                    let angleDeg = Math.atan2(localPoint.x, -localPoint.z) * (180 / Math.PI);
+                    if (angleDeg < 0) angleDeg += 360;
+                    angleDeg = Math.round(angleDeg);
+                    console.log(`ANGLE: ${angleDeg}° (click same spot on panorama = same angle)`);
+                }
+            };
+            window.addEventListener('click', this.onDebugClick);
+        }
     }
 
     createBackButton() {
@@ -103,145 +107,19 @@ export class PanoramaViewer {
         this.controlDock.add(this.backBtn);
     }
 
-    createAudioControls() {
-        // Play/Pause Button
-        this.playBtnCanvas = CanvasUI.createPlayButtonTexture(false);
-        const playTexture = new THREE.CanvasTexture(this.playBtnCanvas);
-        const playGeometry = new THREE.PlaneGeometry(0.18, 0.18);
-        const playMaterial = new THREE.MeshBasicMaterial({
-            map: playTexture,
-            transparent: true,
-            side: THREE.DoubleSide
-        });
-
-        this.playBtn = new THREE.Mesh(playGeometry, playMaterial);
-        // Position at angle 55° to the right, radius 1.6
-        const playAngle = Math.PI * 0.3; // ~55 degrees
-        this.playBtn.position.set(
-            Math.sin(playAngle) * 1.6,
-            -1.0,
-            -Math.cos(playAngle) * 1.6
-        );
-        this.playBtn.lookAt(0, 0.6, 0);
-        this.playBtn.userData.isInteractable = true;
-        this.playBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
-        this.playBtn.userData.targetScale = new THREE.Vector3(1, 1, 1);
-        this.playBtn.userData.animProgress = 1;
-        this.playBtn.onHoverIn = () => this.playBtn.userData.targetScale.set(1.2, 1.2, 1.2);
-        this.playBtn.onHoverOut = () => this.playBtn.userData.targetScale.copy(this.playBtn.userData.originalScale);
-        this.playBtn.onClick = () => this.togglePlay();
-        this.controlDock.add(this.playBtn);
-
-        // Mute Button
-        this.muteBtnCanvas = CanvasUI.createMuteButtonTexture(false);
-        const muteTexture = new THREE.CanvasTexture(this.muteBtnCanvas);
-        const muteGeometry = new THREE.PlaneGeometry(0.18, 0.18);
-        const muteMaterial = new THREE.MeshBasicMaterial({
-            map: muteTexture,
-            transparent: true,
-            side: THREE.DoubleSide
-        });
-
-        this.muteBtn = new THREE.Mesh(muteGeometry, muteMaterial);
-        // Position at angle 62° to the right, radius 1.6
-        const muteAngle = Math.PI * 0.34; // ~62 degrees (7° gap from play)
-        this.muteBtn.position.set(
-            Math.sin(muteAngle) * 1.6,
-            -1.0,
-            -Math.cos(muteAngle) * 1.6
-        );
-        this.muteBtn.lookAt(0, 0.6, 0);
-        this.muteBtn.userData.isInteractable = true;
-        this.muteBtn.userData.originalScale = new THREE.Vector3(1, 1, 1);
-        this.muteBtn.userData.targetScale = new THREE.Vector3(1, 1, 1);
-        this.muteBtn.userData.animProgress = 1;
-        this.muteBtn.onHoverIn = () => this.muteBtn.userData.targetScale.set(1.2, 1.2, 1.2);
-        this.muteBtn.onHoverOut = () => this.muteBtn.userData.targetScale.copy(this.muteBtn.userData.originalScale);
-        this.muteBtn.onClick = () => this.toggleMute();
-        this.controlDock.add(this.muteBtn);
-    }
-
-    setAudioButtonsPosition(mode) {
-        // mode: 'with-dock' (Toraja) or 'standalone' (other locations)
-        const radius = 1.6;
-        let y;
-
-        // SYNC_NOTE: Ensure yUp matches the Back button's local Y position in standalone mode!
-        // Currently Back button is at local Y = -1.0 (World 0.6)
-        const yUp = -1.0;
-
-        let playAngle;
-        let muteAngle;
-
+    setAudioButtonsPosition(mode, subLocationCount = 0, lastItemTheta = undefined) {
+        // Delegate to AudioControls component
         if (mode === 'with-dock') {
-            // Far right to avoid dock thumbnails
-            // SYNC_NOTE: This height must match the SubMenu dock height!
-            // SubMenu dock is at World Y = 0.7.
-            // Panorama Group is at World Y = 1.6.
-            // So local Y = 0.7 - 1.6 = -0.9.
-            y = -0.9;
-
-            playAngle = Math.PI * 0.21; // ~38° (closer to dock)
-            muteAngle = Math.PI * 0.25; // ~45°
-
-            this.playBtn.position.set(Math.sin(playAngle) * radius, y, -Math.cos(playAngle) * radius);
-            this.muteBtn.position.set(Math.sin(muteAngle) * radius, y, -Math.cos(muteAngle) * radius);
-
-            // Look at world height 0.7 (same as buttons)
-            this.playBtn.lookAt(0, 0.7, 0);
-            this.muteBtn.lookAt(0, 0.7, 0);
+            this.dockCenterOffset = 0.2; // Match SubMenu centerOffset
+            this.audioControls.setPosition(mode, { subLocationCount, lastItemTheta });
         } else {
-            // Close to Back button (standalone mode) - TIGHTER spacing
-            playAngle = Math.PI * 0.075; // Shifted right (~13.5°)
-            muteAngle = Math.PI * 0.115; // Shifted right (~20.7°)
-
-            this.playBtn.position.set(Math.sin(playAngle) * radius, yUp, -Math.cos(playAngle) * radius);
-            this.muteBtn.position.set(Math.sin(muteAngle) * radius, yUp, -Math.cos(muteAngle) * radius);
-
-            // Look at world height 0.6 (same as buttons)
-            this.playBtn.lookAt(0, 0.6, 0);
-            this.muteBtn.lookAt(0, 0.6, 0);
+            this.dockCenterOffset = 0;
+            this.audioControls.setPosition(mode);
         }
-    }
-
-    updatePlayButton(isPlaying) {
-        // Redraw on the existing canvas
-        CanvasUI.drawPlayButton(this.playBtnCanvas, isPlaying);
-        if (this.playBtn && this.playBtn.material.map) {
-            this.playBtn.material.map.needsUpdate = true;
-        }
-    }
-
-    updateMuteButton(isMuted) {
-        CanvasUI.drawMuteButton(this.muteBtnCanvas, isMuted);
-        if (this.muteBtn && this.muteBtn.material.map) {
-            this.muteBtn.material.map.needsUpdate = true;
-        }
-    }
-
-    togglePlay() {
-        if (!this.currentAudio) return;
-
-        if (this.isPlaying) {
-            this.currentAudio.pause();
-            this.isPlaying = false;
-        } else {
-            this.currentAudio.play().catch(e => console.log('Audio play error:', e));
-            this.isPlaying = true;
-        }
-        this.updatePlayButton(this.isPlaying);
-    }
-
-    toggleMute() {
-        if (!this.currentAudio) return;
-
-        this.isMuted = !this.isMuted;
-        this.currentAudio.muted = this.isMuted;
-        this.updateMuteButton(this.isMuted);
     }
 
     load(index) {
-        const location = LOCATIONS[index];
+        const location = TOUR_DATA[index];
         if (!location) {
             console.error('Invalid location index:', index);
             return;
@@ -268,26 +146,25 @@ export class PanoramaViewer {
             this.currentAudio = new Audio(location.audio);
             this.currentAudio.loop = false; // No loop, play once
             this.currentAudio.volume = 0.5;
-            this.currentAudio.muted = this.isMuted;
+
+            // Bind audio to AudioControls
+            this.audioControls.setAudio(this.currentAudio);
 
             // Handle audio ended
             this.currentAudio.addEventListener('ended', () => {
-                this.isPlaying = false;
-                this.updatePlayButton(false);
+                this.audioControls.setState(false, this.audioControls.isMuted);
             });
 
             // Auto-start
             this.currentAudio.play().then(() => {
-                this.isPlaying = true;
-                this.updatePlayButton(true);
+                this.audioControls.setState(true, this.audioControls.isMuted);
             }).catch(err => {
                 console.log('Audio autoplay blocked:', err);
-                this.isPlaying = false;
-                this.updatePlayButton(false);
+                this.audioControls.setState(false, this.audioControls.isMuted);
             });
         } else {
-            this.isPlaying = false;
-            this.updatePlayButton(false);
+            this.audioControls.setAudio(null);
+            this.audioControls.setState(false, false);
         }
 
         // Check for multi-scene data
@@ -296,11 +173,15 @@ export class PanoramaViewer {
             // Lazy load other scenes in background
             this.preloadScenes(location.scenes.slice(1));
         } else if (location.panorama) {
-            this.loadTexture(location.panorama);
+            // Load with depth map if available
+            this.loadTextureWithDepth(location.panorama, location.depthMap);
             this.clearHotspots();
         }
 
         this.group.visible = true;
+
+        // Reset controlDock rotation to face user when loading new location
+        this.resetControlDockRotation();
     }
 
     loadScene(sceneData) {
@@ -321,12 +202,24 @@ export class PanoramaViewer {
     }
 
     loadTexture(path) {
+        // PROTOTYPE MODE: If path starts with "placeholder", generate strictly procedural texture
+        if (path && path.startsWith('placeholder')) {
+            // Extract zone name/number for display
+            // e.g. "placeholder_zone1"
+            this.loadFallbackTexture(path.replace('placeholder_', 'ZONE ').toUpperCase());
+            this.hideLoading();
+            return;
+        }
+
         // Check cache first
         if (this.textureCache && this.textureCache.has(path)) {
             console.log('Using cached texture:', path);
             const cachedTexture = this.textureCache.get(path);
-            this.material.map = cachedTexture;
-            this.material.needsUpdate = true;
+            this.basicMaterial.map = cachedTexture;
+            this.basicMaterial.needsUpdate = true;
+            // Ensure sphere uses basic material (not parallax from previous location)
+            this.sphere.material = this.basicMaterial;
+            this.useParallax = false;
             this.hideLoading(); // Ensure loading is hidden immediately
             return;
         }
@@ -342,8 +235,11 @@ export class PanoramaViewer {
                 if (!this.textureCache) this.textureCache = new Map();
                 this.textureCache.set(path, texture);
 
-                this.material.map = texture;
-                this.material.needsUpdate = true;
+                this.basicMaterial.map = texture;
+                this.basicMaterial.needsUpdate = true;
+                // Ensure sphere uses basic material (not parallax from previous location)
+                this.sphere.material = this.basicMaterial;
+                this.useParallax = false;
                 // Hide loading indicator
                 this.hideLoading();
             },
@@ -352,11 +248,20 @@ export class PanoramaViewer {
                 // console.log((xhr.loaded / xhr.total * 100) + '% loaded');
             },
             (error) => {
-                console.error('Error loading panorama:', error);
-                this.loadFallbackTexture('Error Loading');
+                console.warn('Error loading panorama (using fallback):', path);
+                this.loadFallbackTexture('ZONE ' + (this.currentLocation?.id || '?'));
                 this.hideLoading();
             }
         );
+    }
+
+    /**
+     * Load panorama texture (Depth map support removed)
+     */
+    loadTextureWithDepth(colorPath, depthPath) {
+        // We ignore depthPath now as parallax is removed.
+        // Just call standard loadTexture
+        this.loadTexture(colorPath);
     }
 
     // Preload multiple textures in background (lazy loading)
@@ -456,6 +361,32 @@ export class PanoramaViewer {
         }
     }
 
+    /**
+     * Update loading indicator to follow camera direction
+     * Unlike controlDock, loading always follows immediately (no threshold)
+     */
+    updateLoadingPosition() {
+        if (!this.loadingGroup?.visible || !this.camera) return;
+
+        // Get camera's horizontal direction
+        const cameraDirection = new THREE.Vector3();
+        this.camera.getWorldDirection(cameraDirection);
+
+        // Calculate target angle (face the camera)
+        const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI;
+
+        // Smoothly rotate to target
+        let currentAngle = this.loadingGroup.rotation.y;
+        let diff = targetAngle - currentAngle;
+
+        // Normalize difference to [-PI, PI]
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+
+        // Fast follow for loading indicator
+        this.loadingGroup.rotation.y += diff * 0.15;
+    }
+
     showLoading() {
         this.isLoading = true;
         if (this.loadingGroup) {
@@ -508,66 +439,88 @@ export class PanoramaViewer {
         return this.arrowTexture;
     }
 
-    createArrowMesh(linkData) {
-        const texture = this.createArrowTexture();
-        const geometry = new THREE.PlaneGeometry(0.3, 0.3); // Small size
+    createHotspotMesh(data) {
+        if (!data) return null;
+
+        // Visual Icon based on type
+        // 'photo' -> Camera icon? 
+        // 'info' -> Info icon?
+        // For now, use simple circles/planes with distinguishable aspect or color
+
+        const geometry = new THREE.CircleGeometry(0.2, 32);
+        let color = 0xffffff;
+        if (data.type === 'photo') color = 0xffcc00; // Gold for History
+        if (data.type === 'info') color = 0x00ccff; // Blue for Info
+        if (data.type === 'scene') color = 0xffffff; // White for movement
+
         const material = new THREE.MeshBasicMaterial({
-            map: texture,
+            color: color,
             transparent: true,
+            opacity: 0.8,
             side: THREE.DoubleSide,
-            depthTest: false // Always show on top
+            depthTest: false
         });
 
         const mesh = new THREE.Mesh(geometry, material);
 
-        // Angle-based positioning
-        const radius = 4.5; // Slightly further away
-        const yPos = 0;  // Eye level (0 relative to group at 1.6)
-        const angleRad = (linkData.angle || 0) * (Math.PI / 180);
+        // Position on sphere
+        const radius = 45; // Inside the 50m sphere
 
-        // Calculate position on circle
-        const x = Math.sin(angleRad) * radius;
-        const z = -Math.cos(angleRad) * radius;
+        // Convert Pitch/Yaw (deg) to Vector3
+        // Yaw = Rotation around Y (left/right). 0 = Center (-Z)
+        // Pitch = Rotation around X (up/down). 0 = Horizon
+        const yawRad = THREE.MathUtils.degToRad(data.yaw || 0);
+        const pitchRad = THREE.MathUtils.degToRad(data.pitch || 0);
 
-        mesh.position.set(x, yPos, z);
+        const x = radius * Math.sin(yawRad) * Math.cos(pitchRad);
+        const y = radius * Math.sin(pitchRad);
+        const z = -radius * Math.cos(yawRad) * Math.cos(pitchRad);
 
-        // Face the user (center)
-        mesh.lookAt(0, 0, 0);
+        mesh.position.set(x, y, z);
+        mesh.lookAt(0, 0, 0); // Face center
 
         mesh.userData.isInteractable = true;
-        mesh.userData.originalScale = new THREE.Vector3(1, 1, 1);
-        mesh.userData.targetScale = new THREE.Vector3(1, 1, 1);
-        mesh.userData.animProgress = 1;
-        mesh.onHoverIn = () => mesh.userData.targetScale.set(1.3, 1.3, 1.3);
-        mesh.onHoverOut = () => mesh.userData.targetScale.copy(mesh.userData.originalScale);
+        mesh.userData.activationTime = data.activationTime || 1.5;
+        this.addPulseAnimation(mesh);
+
         mesh.onClick = () => {
-            console.log('Clicked hotspot:', linkData.label, 'Target:', linkData.target);
-            if (!this.currentLocation || !this.currentLocation.scenes) {
-                console.error('No scenes data found for current location');
-                return;
-            }
-            const nextScene = this.currentLocation.scenes.find(s => s.id === linkData.target);
-            if (nextScene) {
-                console.log('Transitioning to scene:', nextScene.id);
-                this.loadScene(nextScene);
-            } else {
-                console.error('Target scene not found:', linkData.target);
-                console.log('Available scenes:', this.currentLocation.scenes.map(s => s.id));
+            console.log('Clicked hotspot:', data.label, data.type);
+
+            if (data.type === 'photo') {
+                this.photoOverlay.show(data.data, () => console.log('Photo closed'));
+            } else if (data.type === 'info') {
+                // Determine rotation for panel to face user
+                const rotationY = Math.atan2(mesh.position.x, mesh.position.z) + Math.PI;
+                this.curvedInfoPanel.show(data.data, mesh.position.clone().multiplyScalar(0.1), rotationY); // much closer?
+                // Wait, CurvedInfoPanel expects world position.
+                // If we put it at mesh position (45m), it's too far.
+                // It should appear 2m in front of user in Direction of hotspot.
+                const panelPos = mesh.position.clone().normalize().multiplyScalar(2.5); // 2.5m away
+                this.curvedInfoPanel.show(data.data, panelPos, rotationY);
             }
         };
 
         return mesh;
     }
 
-    renderHotspots(links) {
+    addPulseAnimation(mesh) {
+        mesh.userData.originalScale = new THREE.Vector3(1, 1, 1);
+        mesh.userData.targetScale = new THREE.Vector3(1.2, 1.2, 1);
+        mesh.onHoverIn = () => mesh.scale.set(1.3, 1.3, 1.3);
+        mesh.onHoverOut = () => mesh.scale.copy(mesh.userData.originalScale);
+    }
+
+    renderHotspots(hotspots) {
         this.clearHotspots();
-        if (!links) return;
+        if (!hotspots) return;
 
         this.currentHotspots = [];
-        links.forEach(link => {
-            const arrow = this.createArrowMesh(link);
-            this.group.add(arrow);
-            this.currentHotspots.push(arrow);
+        hotspots.forEach(data => {
+            const mesh = this.createHotspotMesh(data);
+            if (mesh) {
+                this.group.add(mesh);
+                this.currentHotspots.push(mesh);
+            }
         });
     }
 
@@ -587,28 +540,72 @@ export class PanoramaViewer {
 
     loadFallbackTexture(name) {
         const canvas = document.createElement('canvas');
-        canvas.width = 2048;
-        canvas.height = 1024;
+        canvas.width = 4096; // Higher res for VR
+        canvas.height = 2048;
         const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
 
-        // Gradient background
-        const gradient = ctx.createLinearGradient(0, 0, 0, 1024);
-        gradient.addColorStop(0, '#1a1a3e');
-        gradient.addColorStop(1, '#0a0a1e');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 2048, 1024);
+        // Cinematic Dark Background (Requested: Hitam Gelap)
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(0, 0, w, h);
 
-        // Text
+        // Minimalist Grid (Requested: Sedikit garis penanda arah)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 2;
+
+        // A. Horizon Line
+        ctx.beginPath();
+        ctx.moveTo(0, h / 2);
+        ctx.lineTo(w, h / 2);
+        ctx.stroke();
+
+        // B. Vertical Cardinal Lines (North, East, South, West)
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < w; i += w / 4) {
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, h);
+        }
+        ctx.stroke();
+
+        // C. Zenith/Nadir Rims
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(w, 0);
+        ctx.moveTo(0, h); ctx.lineTo(w, h);
+        ctx.stroke();
+
+        // SCENE INFO TEXT (Floating in front)
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 80px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(name, 1024, 512);
+
+        // Front Text (0 deg = Forward direction)
+        // For equirectangular: x=0 and x=w are the front, x=w/2 is behind
+        // To place at ~90° from center (which is front in 360), use w*0.25 or w*0.75
+        const drawText = (offsetX) => {
+            // Title - larger and more prominent
+            ctx.font = 'bold 140px Roboto, sans-serif';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(name, offsetX, h / 2 - 150);
+
+            // Description
+            if (this.currentLocation) {
+                ctx.font = '70px Roboto, sans-serif';
+                ctx.fillStyle = '#888888';
+                ctx.fillText(this.currentLocation.description || '', offsetX, h / 2 + 150);
+            }
+        };
+
+        // Draw at FRONT (0°) - the left edge area represents forward direction
+        // Using w*0.25 places text 90° to the left (front when facing forward from sphere center)
+        drawText(w * 0.25);
 
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
-        this.material.map = texture;
-        this.material.needsUpdate = true;
+        this.basicMaterial.map = texture;
+        this.basicMaterial.needsUpdate = true;
     }
 
     setBackButtonVisibility(visible) {
@@ -633,6 +630,57 @@ export class PanoramaViewer {
         // For now, let's keep it simple.
         this.setBackButtonVisibility(!isVR);
     }
+
+    /**
+     * Update controlDock rotation to follow camera horizontally
+     * Stops following when user looks down to allow interaction
+     */
+    updateControlDockRotation() {
+        if (!this.camera || !this.controlDock) return;
+
+        // Get camera's direction
+        const cameraDirection = new THREE.Vector3();
+        this.camera.getWorldDirection(cameraDirection);
+
+        // Check if looking down (negative Y component means looking down)
+        const pitch = Math.asin(cameraDirection.y); // Radians, negative = looking down
+
+        // Target angle based on camera direction
+        // Add centerOffset to match the dock's shifted position
+        const targetAngle = Math.atan2(cameraDirection.x, cameraDirection.z) + Math.PI + this.dockCenterOffset;
+
+        // Use CONFIG threshold (default -0.45 rad ≈ -26 degrees)
+        const threshold = CONFIG.controlDock?.lookDownThreshold || -0.45;
+
+        // If looking down more than threshold, stop rotating (let user select)
+        if (pitch > threshold) {
+            // Smoothly rotate to target (ease out)
+            let currentAngle = this.controlDock.rotation.y;
+            let diff = targetAngle - currentAngle;
+
+            // Normalize difference to [-PI, PI]
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+
+            // Ease out: faster at start, slower at end
+            const easeSpeed = CONFIG.controlDock?.followEaseSpeed || 0.08;
+            this.controlDock.rotation.y += diff * easeSpeed;
+        }
+        // Otherwise, dock stays in place so user can interact
+    }
+
+    /**
+     * Reset controlDock rotation to face the camera
+     * Call this when showing panorama to align dock with user's view
+     */
+    resetControlDockRotation() {
+        if (!this.camera || !this.controlDock) return;
+
+        const vector = new THREE.Vector3();
+        this.camera.getWorldDirection(vector);
+        this.controlDock.rotation.y = Math.atan2(vector.x, vector.z) + Math.PI + this.dockCenterOffset;
+    }
+
 
     update(delta) {
         const animSpeed = 6;
@@ -667,31 +715,92 @@ export class PanoramaViewer {
             this.currentHotspots.forEach(animateObject);
         }
 
-        // Update loading spinner animation
+        // Update loading spinner animation and position
         this.updateLoadingSpinner();
+        this.updateLoadingPosition();
+
+        // === ControlDock camera following ===
+        // Make controlDock follow camera's horizontal rotation (like SubMenu)
+        // BUT stop following when user looks DOWN toward the dock for interaction
+        this.updateControlDockRotation();
 
         // === VR FIX: Sync sphere center with camera position for proper stereo ===
         // In VR/stereo mode, the sphere MUST be centered exactly at the camera 
         // position to prevent "double vision" where left/right eyes see different content
-        if (this.sphere) {
+        // NOTE: Only move the sphere, NOT the controlDock (keep UI stable)
+        if (this.sphere && this.renderer?.xr?.isPresenting) {
             const cameraWorldPos = new THREE.Vector3();
+            const xrCamera = this.renderer.xr.getCamera();
+            xrCamera.getWorldPosition(cameraWorldPos);
 
-            // In WebXR mode, use the XR camera for accurate positioning
-            if (this.renderer && this.renderer.xr && this.renderer.xr.isPresenting) {
-                const xrCamera = this.renderer.xr.getCamera();
-                xrCamera.getWorldPosition(cameraWorldPos);
-            } else if (this.camera) {
-                this.camera.getWorldPosition(cameraWorldPos);
-            }
+            // Only move sphere to camera position, keep controlDock at fixed height
+            this.sphere.position.copy(cameraWorldPos).sub(this.group.position);
+        }
+    }
 
-            // Sync group position instead of just sphere, as controls need to follow too?
-            // Actually, normally we want panoram to be at 0,0,0 relative to user.
-            // If user walks in VR, we need sphere to follow them so they never reach the "wall".
-            this.group.position.copy(cameraWorldPos);
+    dispose() {
+        // Remove event listeners
+        if (this.onDebugClick) {
+            window.removeEventListener('click', this.onDebugClick);
+        }
 
-            // But we must keep height? 
-            // Usually we want eye level (1.6) to coincide with horizon. 
-            // If we move group to camera pos, we effectively center it.
+        // Dispose Managers & Components
+        if (this.audioManager) this.audioManager.dispose();
+        if (this.photoOverlay) this.photoOverlay.dispose();
+        if (this.curvedInfoPanel) this.curvedInfoPanel.dispose();
+
+        // Dispose sphere
+        if (this.sphere) {
+            this.sphere.geometry.dispose();
+            if (this.sphere.material.map) this.sphere.material.map.dispose();
+            this.sphere.material.dispose();
+        }
+
+        // Dispose controls
+        if (this.backBtn) {
+            this.backBtn.geometry.dispose();
+            if (this.backBtn.material.map) this.backBtn.material.map.dispose();
+            this.backBtn.material.dispose();
+        }
+        // Removed Play/Mute btns logic earlier so no need to dispose them here if they aren't created.
+        // But for safety:
+        /* if (this.playBtn) ... */
+        if (this.playBtn) {
+            this.playBtn.geometry.dispose();
+            if (this.playBtn.material.map) this.playBtn.material.map.dispose();
+            this.playBtn.material.dispose();
+        }
+        if (this.muteBtn) {
+            this.muteBtn.geometry.dispose();
+            if (this.muteBtn.material.map) this.muteBtn.material.map.dispose();
+            this.muteBtn.material.dispose();
+        }
+
+        // Dispose loading
+        if (this.loadingGroup) {
+            this.loadingGroup.traverse((child) => {
+                if (child.isMesh) {
+                    child.geometry.dispose();
+                    if (child.material.map) child.material.map.dispose();
+                    child.material.dispose();
+                }
+            });
+        }
+
+        // Dispose hotspots
+        if (this.currentHotspots) {
+            this.currentHotspots.forEach(mesh => {
+                mesh.geometry.dispose();
+                mesh.material.dispose();
+            });
+        }
+        if (this.arrowTexture) {
+            this.arrowTexture.dispose();
+        }
+
+        // Dispose group
+        if (this.group && this.scene) {
+            this.scene.remove(this.group);
         }
     }
 }

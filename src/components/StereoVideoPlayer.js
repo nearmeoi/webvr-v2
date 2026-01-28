@@ -20,7 +20,7 @@ export class StereoVideoPlayer {
         this.scene.add(this.group);
         this.group.visible = false;
 
-        this.video = null;
+
         this.videoTexture = null;
         this.isPlaying = false;
         this.isStereoMode = false;
@@ -326,7 +326,7 @@ export class StereoVideoPlayer {
         customTextCanvas.height = 64;
         const ctx = customTextCanvas.getContext('2d');
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 24px sans-serif';
+        ctx.font = 'bold 24px Roboto, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('Loading Video...', 128, 32);
@@ -570,7 +570,6 @@ export class StereoVideoPlayer {
         }
         this.isPlaying = false;
         this.updatePlayButton(false);
-        this.updatePlayButton(false);
         if (this.htmlPlayBtn) this.htmlPlayBtn.innerHTML = '▶ &nbsp; PLAY';
 
         // Force exit VR when stopped/back
@@ -702,13 +701,20 @@ export class StereoVideoPlayer {
     }
 
     dispose() {
-        if (this.video) {
-            this.video.pause();
-            this.video.src = '';
+        // Cleanup video
+        if (this.fullscreenVideo) {
+            this.fullscreenVideo.pause();
+            this.fullscreenVideo.src = '';
         }
         if (this.videoTexture) {
             this.videoTexture.dispose();
         }
+
+        // Remove overlay from DOM
+        if (this.videoOverlay?.parentNode) {
+            this.videoOverlay.parentNode.removeChild(this.videoOverlay);
+        }
+
         this.scene.remove(this.group);
     }
 }

@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { CanvasUI } from '../utils/CanvasUI.js';
+import { animateScaleAndOpacity, animateScale } from '../utils/AnimationHelper.js';
+import { CONFIG } from '../config.js';
 
 export class SubMenu {
     constructor(scene, camera, parentLocation, onSelect, onBack) {
@@ -22,23 +25,22 @@ export class SubMenu {
         // Title removed per user request
     }
 
+    getLastItemTheta() {
+        const totalAngle = Math.PI * 0.5;
+        const centerOffset = 0.2;
+        // The rightmost item (last in visual order because of reversed loop logic or startAngle?)
+        // In initMenu: theta = startAngle + (itemCount - 1 - i) * step
+        // Last item in array (i=count-1) -> theta = startAngle.
+        // StartAngle is the smallest angle value.
+        // Coordinate system: X=sin(theta), Z=cos(theta).
+        return Math.PI + centerOffset - totalAngle / 2;
+    }
+
     initMenu() {
         const itemCount = this.subLocations.length;
 
-        // Helper for rounded rect path
-        const roundRect = (ctx, x, y, w, h, r) => {
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
-            ctx.closePath();
-        };
+        // Use shared roundRect from CanvasUI
+        const roundRect = CanvasUI.roundRect;
 
         // Create thumbnail card with image
         const createThumbnailTexture = (location, img) => {
@@ -49,21 +51,21 @@ export class SubMenu {
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Glass Background with teal/cyan tint for sub-menu
+            // Glass Background - Premium Dark
             roundRect(ctx, 8, 8, 384, 264, 24);
-            ctx.fillStyle = 'rgba(0, 150, 180, 0.15)';
+            ctx.fillStyle = 'rgba(20, 20, 35, 0.6)'; // Dark semi-transparent
             ctx.fill();
 
             // Gradient Overlay
             const gradient = ctx.createLinearGradient(0, 0, 0, 280);
-            gradient.addColorStop(0, 'rgba(0, 200, 200, 0.1)');
-            gradient.addColorStop(1, 'rgba(0, 100, 120, 0.05)');
+            gradient.addColorStop(0, 'rgba(60, 60, 80, 0.2)');
+            gradient.addColorStop(1, 'rgba(10, 10, 20, 0.8)');
             ctx.fillStyle = gradient;
             ctx.fill();
 
-            // Border
+            // Border - White/Silver Glow
             ctx.lineWidth = 3;
-            ctx.strokeStyle = 'rgba(0, 220, 220, 0.4)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.stroke();
 
             // Draw thumbnail image
@@ -95,7 +97,7 @@ export class SubMenu {
 
             // Text label
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 26px sans-serif';
+            ctx.font = 'bold 26px Roboto, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.shadowColor = 'rgba(0,0,0,0.8)';
@@ -235,7 +237,7 @@ export class SubMenu {
         ctx.stroke();
 
         ctx.fillStyle = 'white';
-        ctx.font = 'bold 48px sans-serif';
+        ctx.font = 'bold 48px Roboto, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -266,37 +268,32 @@ export class SubMenu {
         this.group.add(this.backBtn);
     }
 
-    createTitle() {
-        const canvas = document.createElement('canvas');
-        canvas.width = 600;
-        canvas.height = 100;
-        const ctx = canvas.getContext('2d');
-
-        ctx.clearRect(0, 0, 600, 100);
-        ctx.fillStyle = '#00dddd';
-        ctx.font = 'bold 50px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(0,220,220,0.5)';
-        ctx.shadowBlur = 10;
-        ctx.fillText(`TORAJA`, 300, 50);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        const geometry = new THREE.PlaneGeometry(0.8, 0.13);
-        const material = new THREE.MeshBasicMaterial({
-            map: texture,
-            transparent: true,
-            side: THREE.DoubleSide
-        });
-
-        const titleMesh = new THREE.Mesh(geometry, material);
-        titleMesh.position.set(0, 0.65, -1.6);
-        titleMesh.lookAt(0, 0.65, 0);
-
-        this.group.add(titleMesh);
-    }
-
     update(delta) {
+        if (!this.group.visible) return;
+
+        // --- Synchronized Rotation Logic (Matches PanoramaViewer ControlDock) ---
+        if (this.camera) {
+            const cameraDir = new THREE.Vector3();
+            this.camera.getWorldDirection(cameraDir);
+            const pitch = Math.asin(cameraDir.y);
+
+            // Only rotate if not looking down too much (avoids jitter/conflicts)
+            if (pitch > CONFIG.controlDock.lookDownThreshold) {
+                // Target angle: Face camera + Center Offset (0.2)
+                const targetAngle = Math.atan2(cameraDir.x, cameraDir.z) + Math.PI + 0.2;
+
+                let diff = targetAngle - this.group.rotation.y;
+
+                // Normalize angle to -PI..PI
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+
+                // Apply rotation with same smoothing speed as ControlDock
+                this.group.rotation.y += diff * CONFIG.controlDock.followEaseSpeed;
+            }
+        }
+        // ------------------------------------------------------------------------
+
         const animSpeed = 6;
 
         // Smooth scale animation for thumbnails
@@ -394,5 +391,26 @@ export class SubMenu {
 
     hide() {
         this.group.visible = false;
+    }
+
+    dispose() {
+        // Cleanup thumbnails
+        this.thumbnails.forEach(mesh => {
+            if (mesh.material.map) mesh.material.map.dispose();
+            mesh.material.dispose();
+            mesh.geometry.dispose();
+        });
+
+        // Cleanup back button
+        if (this.backBtn) {
+            if (this.backBtn.material.map) this.backBtn.material.map.dispose();
+            this.backBtn.material.dispose();
+            this.backBtn.geometry.dispose();
+        }
+
+        // Remove from scene
+        if (this.scene) {
+            this.scene.remove(this.group);
+        }
     }
 }
